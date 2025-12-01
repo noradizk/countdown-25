@@ -5,6 +5,9 @@ const { renderer, input, math, run, finish, } = createEngine()
 const { ctx, canvas } = renderer
 run(update)
 
+
+let introProgress = 0
+let introComplete = false
 let openProgress = 0
 let isOpen = false
 let isDragging = false
@@ -14,6 +17,7 @@ let outroProgress = 0
 const openSpeed = 4
 
 canvas.addEventListener("pointerdown", (event) => {
+  if (!introComplete) return // Bloque les interactions pendant l'intro
   const rect = canvas.getBoundingClientRect()
   const xInCanvas = event.clientX - rect.left
   const x = xInCanvas * (canvas.width / rect.width)
@@ -52,8 +56,17 @@ function update(dt) {
   ctx.fillStyle = "black"
   ctx.fillRect(0, 0, w, h)
   
+  // --- INTRO ---
+  if (!introComplete) {
+    introProgress += 0.2 * dt
+    if (introProgress > 1) {
+      introProgress = 1
+      introComplete = true
+    }
+  }
+  
   // --- MISE À JOUR OUVERTURE ---
-  if (!isDragging) {
+  if (!isDragging && introComplete) {
     const target = isOpen ? 1 : 0
     if (openProgress < target) {
       openProgress += openSpeed * dt
@@ -65,12 +78,12 @@ function update(dt) {
   }
   
   // --- OUTRO ---
-  if (openProgress >= 1) {
+  if (openProgress >= 1 && introComplete) {
     outroProgress += 0.8 * dt
     if (outroProgress > 1) outroProgress = 1
   }
   
-  // Scale pour l'outro (1 = normal, grandit progressivement)
+  // Scale pour l'outro
   const outroScale = 1 + outroProgress * 10
   
   // --- SALLE (RECTANGLE BLANC) ---
@@ -79,20 +92,31 @@ function update(dt) {
   const roomX = (w - roomWidth) / 2
   const roomY = (h - roomHeight) / 2
   
-  ctx.fillStyle = "white"
-  ctx.fillRect(roomX, roomY, roomWidth, roomHeight)
+  // Fond blanc de la salle (apparaît progressivement pendant l'intro)
+  if (introProgress > 0.2) {
+    const fillProgress = (introProgress - 0.2) / 0.8
+    ctx.globalAlpha = fillProgress
+    ctx.fillStyle = "white"
+    ctx.fillRect(roomX, roomY, roomWidth, roomHeight)
+    ctx.globalAlpha = 1
+  }
   
-  // "3" NOIR AU CENTRE
-  const fontSize = roomHeight * 0.1
-  ctx.fillStyle = "black"
-  ctx.textAlign = "center"
-  ctx.textBaseline = "middle"
-  ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`
-  ctx.fillText("3", w / 2, h / 2)
+  // "3" NOIR AU CENTRE (apparaît à la fin de l'intro)
+  if (introProgress > 0.2) {
+    const textProgress = (introProgress - 0.5) / 0.5
+    ctx.globalAlpha = textProgress
+    const fontSize = roomHeight * 0.7
+    ctx.fillStyle = "black"
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.font = `${fontSize}px Helvetica, Arial, sans-serif`
+    ctx.fillText("3", w / 2, h / 2)
+    ctx.globalAlpha = 1
+  }
   
-  // --- PORTE (disparaît pendant l'outro) ---
+  // --- PORTE ---
   if (outroProgress < 0.3) {
-    const doorOpacity = 1 - (outroProgress / 0.3)
+    const doorOpacity = outroProgress > 0 ? 1 - (outroProgress / 0.3) : 1
     ctx.globalAlpha = doorOpacity
     
     const doorWidth = roomWidth / outroScale
@@ -106,28 +130,80 @@ function update(dt) {
     ctx.translate(doorLeftX, doorCenterY)
     ctx.scale(doorScaleX, 1)
     
-    ctx.beginPath()
-    ctx.moveTo(0, -doorHeight / 2)
-    ctx.lineTo(doorWidth + perspectiveOffset, -doorHeight / 2 - perspectiveOffset * 0.5)
-    ctx.lineTo(doorWidth + perspectiveOffset, doorHeight / 2 + perspectiveOffset * 0.5)
-    ctx.lineTo(0, doorHeight / 2)
-    ctx.closePath()
+    // Chemin complet de la porte
+    const doorPath = [
+      { x: 0, y: -doorHeight / 2 },
+      { x: doorWidth + perspectiveOffset, y: -doorHeight / 2 - perspectiveOffset * 0.5 },
+      { x: doorWidth + perspectiveOffset, y: doorHeight / 2 + perspectiveOffset * 0.5 },
+      { x: 0, y: doorHeight / 2 }
+    ]
     
+    // Remplissage noir (toujours complet)
+    ctx.beginPath()
+    ctx.moveTo(doorPath[0].x, doorPath[0].y)
+    for (let i = 1; i < doorPath.length; i++) {
+      ctx.lineTo(doorPath[i].x, doorPath[i].y)
+    }
+    ctx.closePath()
     ctx.fillStyle = "black"
     ctx.fill()
+    
+    // Stroke blanc progressif (dessin pendant l'intro)
     ctx.lineWidth = 4
     ctx.strokeStyle = "white"
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    
+    // Calculer la longueur totale du périmètre
+    let totalLength = 0
+    for (let i = 0; i < doorPath.length; i++) {
+      const next = (i + 1) % doorPath.length
+      const dx = doorPath[next].x - doorPath[i].x
+      const dy = doorPath[next].y - doorPath[i].y
+      totalLength += Math.sqrt(dx * dx + dy * dy)
+    }
+    
+    const drawLength = totalLength * Math.min(introProgress / 0.8, 1)
+    
+    ctx.beginPath()
+    let currentLength = 0
+    ctx.moveTo(doorPath[0].x, doorPath[0].y)
+    
+    for (let i = 0; i < doorPath.length; i++) {
+      const next = (i + 1) % doorPath.length
+      const dx = doorPath[next].x - doorPath[i].x
+      const dy = doorPath[next].y - doorPath[i].y
+      const segmentLength = Math.sqrt(dx * dx + dy * dy)
+      
+      if (currentLength + segmentLength <= drawLength) {
+        ctx.lineTo(doorPath[next].x, doorPath[next].y)
+        currentLength += segmentLength
+      } else {
+        const remaining = drawLength - currentLength
+        const ratio = remaining / segmentLength
+        ctx.lineTo(
+          doorPath[i].x + dx * ratio,
+          doorPath[i].y + dy * ratio
+        )
+        break
+      }
+    }
     ctx.stroke()
     
-    const handleWidth = 16
-    const handleHeight = doorHeight * 0.35
-    const handleX = doorWidth + perspectiveOffset - handleWidth - 30
-    const handleY = -handleHeight / 2
-    ctx.beginPath()
-    ctx.roundRect(handleX, handleY, handleWidth, handleHeight, handleWidth / 2)
-    ctx.lineWidth = 3
-    ctx.strokeStyle = "white"
-    ctx.stroke()
+    // Poignée (apparaît à la fin de l'intro de la porte)
+    if (introProgress > 0.6) {
+      const handleProgress = (introProgress - 0.6) / 0.4
+      ctx.globalAlpha = doorOpacity * handleProgress
+      const handleWidth = 16
+      const handleHeight = doorHeight * 0.35
+      const handleX = doorWidth + perspectiveOffset - handleWidth - 30
+      const handleY = -handleHeight / 2
+      ctx.beginPath()
+      ctx.roundRect(handleX, handleY, handleWidth, handleHeight, handleWidth / 2)
+      ctx.lineWidth = 3
+      ctx.strokeStyle = "white"
+      ctx.stroke()
+    }
     
     ctx.restore()
     ctx.globalAlpha = 1
