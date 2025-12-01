@@ -16,6 +16,18 @@ let dragStartProgress = 0
 let outroProgress = 0
 const openSpeed = 4
 
+// ---- SONS PORTE ----
+const doorOpenSound = new Audio("audio/")
+const doorCloseSound = new Audio("sounds/door_close.mp3")
+
+function playDoorSound(isOpening) {
+  const s = isOpening ? doorOpenSound : doorCloseSound
+  s.currentTime = 0 // repart du début à chaque fois
+  s.play().catch(() => {
+    // au cas où le navigateur bloque, on ignore l’erreur
+  })
+}
+
 canvas.addEventListener("pointerdown", (event) => {
   if (!introComplete) return // Bloque les interactions pendant l'intro
   const rect = canvas.getBoundingClientRect()
@@ -42,7 +54,14 @@ canvas.addEventListener("pointermove", (event) => {
 function endDrag() {
   if (!isDragging) return
   isDragging = false
-  isOpen = openProgress > 0.5
+
+  const wasOpen = isOpen         // on garde l'ancien état
+  isOpen = openProgress > 0.5    // nouveau choix : ouverte ou fermée ?
+
+  // Si l'état a changé → on joue un son
+  if (isOpen !== wasOpen) {
+    playDoorSound(isOpen)        // true = ouverture, false = fermeture
+  }
 }
 
 canvas.addEventListener("pointerup", endDrag)
