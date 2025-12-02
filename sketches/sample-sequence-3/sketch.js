@@ -233,10 +233,6 @@ function update(dt) {
   }
 
 }
-  if (outroProgress >= 1) {
-  finish()
-  return
-}
 
 
 
