@@ -15,6 +15,9 @@ let dragStartX = 0
 let dragStartProgress = 0
 let outroProgress = 0
 const openSpeed = 4
+let canOutro = false
+let outroDelay = 0
+
 
 // ---- SONS PORTE ----
 const doorOpenSound = new Audio("audio/")
@@ -226,8 +229,18 @@ function update(dt) {
     
     ctx.restore()
     ctx.globalAlpha = 1
+
   }
+
 }
+  if (outroProgress >= 1) {
+  finish()
+  return
+}
+
+
+
+
 /*
 const spring = new Spring({
   position: 0,
