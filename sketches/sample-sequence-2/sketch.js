@@ -3,83 +3,248 @@ import { Spring } from "../_shared/spring.js"
 
 const { renderer, input, math, run, finish } = createEngine()
 const { ctx, canvas } = renderer
+run(update);
 
-let angle = 0;
-let dragging = false;
-let lastMouseAngle = 0;
-let blurAmount = 0;
+// ---------------------------
+//   PARAMS GLOBAUX
+// ---------------------------
+const dragPower = 1.0;
+const maxBlur = 100;
+
+let blurAmount = maxBlur;
+let puzzleSolved = false;
+
+// ---------------------------
+//   HELPERS ANGLES / MATHS
+// ---------------------------
+function degToRad(d) {
+  return d * Math.PI / 180;
+}
+
+function shortestAngleDiff(a, b) {
+  let diff = (a - b) % (2 * Math.PI);
+  if (diff >  Math.PI) diff -= 2 * Math.PI;
+  if (diff < -Math.PI) diff += 2 * Math.PI;
+  return diff;
+}
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+const totalSpanDeg = 170;
+const halfSpanRad = degToRad(totalSpanDeg / 2);
+const centerSmall = degToRad(0);
+const centerBig   = centerSmall + Math.PI;
+
+// ---------------------------
+//   KNOBS
+// ---------------------------
+let knobSmall = {
+  angle: centerSmall - halfSpanRad,       // départ au bord
+  dragging: false,
+  lastMouseAngle: 0,
+  radius: canvas.height * 0.30,
+
+  minAngle: centerSmall - halfSpanRad,
+  maxAngle: centerSmall + halfSpanRad,
+
+  centerAngle: centerSmall,
+  range: halfSpanRad,
+  targetAngle: centerSmall              // sera randomisé après
+};
+
+let knobBig = {
+  angle: centerBig + halfSpanRad,        // départ au bord
+  dragging: false,
+  lastMouseAngle: 0,
+  radius: canvas.height * 0.35,
+
+  minAngle: centerBig - halfSpanRad,
+  maxAngle: centerBig + halfSpanRad,
+
+  centerAngle: centerBig,
+  range: halfSpanRad,
+  targetAngle: centerBig                // sera randomisé après
+};
+
+
+// ---------------------------
+//   RANDOMISATION DE LA SOLUTION
+// ---------------------------
+
+function randomizeSolution() {
+  const marginDeg = 10;                // éviter les bords
+  const margin = degToRad(marginDeg);
+
+  // petit knob : random dans SA plage verticale
+  const minSmall = knobSmall.minAngle + margin;
+  const maxSmall = knobSmall.maxAngle - margin;
+  const randS = Math.random();
+  knobSmall.targetAngle = minSmall + randS * (maxSmall - minSmall);
+
+  // grand knob : random dans SA plage opposée
+  const minBig = knobBig.minAngle + margin;
+  const maxBig = knobBig.maxAngle - margin;
+  const randB = Math.random();
+  knobBig.targetAngle = minBig + randB * (maxBig - minBig);
+
+  // positions de départ (optionnel)
+  knobSmall.angle = knobSmall.minAngle;
+  knobBig.angle   = knobBig.maxAngle;
+}
+// on lance une solution aléatoire au début
+randomizeSolution();
+
+// ---------------------------
+//   MOUSE → COORDS CANVAS
+// ---------------------------
+function getMousePosCanvas(e) {
+  const rect = canvas.getBoundingClientRect();
+
+  const xCss = e.clientX - rect.left;
+  const yCss = e.clientY - rect.top;
+
+  const scaleX = canvas.width  / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  return {
+    x: xCss * scaleX - canvas.width  / 2,
+    y: yCss * scaleY - canvas.height / 2
+  };
+}
 
 function getMouseAngle(e) {
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left - canvas.width / 2;
-  const y = e.clientY - rect.top - canvas.height / 2;
+  const { x, y } = getMousePosCanvas(e);
   return Math.atan2(y, x);
 }
 
-function isOnHandle(e) {
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left - canvas.width / 2;
-  const y = e.clientY - rect.top - canvas.height / 2;
-  
-  const cos = Math.cos(-angle);
-  const sin = Math.sin(-angle);
-  const rx = x * cos - y * sin;
-  const ry = x * sin + y * cos;
-  
-  const radius = canvas.height * 0.3;
-  const strokeWidth = 100;
-  const base = radius + strokeWidth/2;
-  const handleLength = 80;
-  const handleWidth = 90;
-  
+// ---------------------------
+//   HITTEST SUR LA POIGNÉE
+// ---------------------------
+function isOnHandle(e, knob, strokeWidth, handleLength, handleWidth) {
+  const { x, y } = getMousePosCanvas(e);
+
+  // passer dans le repère du knob : rotation inverse
+  const cos = Math.cos(-knob.angle);
+  const sin = Math.sin(-knob.angle);
+  const xr = x * cos - y * sin;
+  const yr = x * sin + y * cos;
+
+  const base = knob.radius + strokeWidth / 2;
+
+  const rectX = -handleWidth / 2;
+  const rectY = -(base + handleLength);
+  const rectW = handleWidth;
+  const rectH = handleLength;
+
   return (
-    rx >= -handleWidth / 2 &&
-    rx <= handleWidth / 2 &&
-    ry >= -(base + handleLength) &&
-    ry <= -base
+    xr >= rectX &&
+    xr <= rectX + rectW &&
+    yr >= rectY &&
+    yr <= rectY + rectH
   );
 }
 
+function isOnBigHandle(e) {
+  // mêmes paramètres que drawGraduatedCircle du grand knob
+  return isOnHandle(e, knobBig, 100, 100, 70);
+}
+
+function isOnSmallHandle(e) {
+  // mêmes paramètres que drawGraduatedCircle du petit knob
+  return isOnHandle(e, knobSmall, 100, 200, 90);
+}
+
+// ---------------------------
+//   EVENTS SOURIS
+// ---------------------------
 canvas.addEventListener("mousedown", (e) => {
-  if (isOnHandle(e)) {
-    dragging = true;
-    lastMouseAngle = getMouseAngle(e);
+  if (puzzleSolved) return;
+
+  const a = getMouseAngle(e);
+
+  // GRAND KNOB (priorité)
+  if (isOnBigHandle(e)) {
+    knobBig.dragging = true;
+    knobBig.lastMouseAngle = a;
+    return;
+  }
+  // PETIT KNOB
+  if (isOnSmallHandle(e)) {
+    knobSmall.dragging = true;
+    knobSmall.lastMouseAngle = a;
+    return;
   }
 });
 
 canvas.addEventListener("mousemove", (e) => {
-  if (!dragging && isOnHandle(e)) {
-    canvas.style.cursor = "grab";
-  } else if (!dragging) {
-    canvas.style.cursor = "default";
+  if (puzzleSolved) return;
+
+  const a = getMouseAngle(e);
+
+  if (knobSmall.dragging) {
+    const delta = shortestAngleDiff(a, knobSmall.lastMouseAngle);
+    let newAngle = knobSmall.angle + delta * dragPower;
+    knobSmall.angle = clamp(newAngle, knobSmall.minAngle, knobSmall.maxAngle);
+    knobSmall.lastMouseAngle = a;
   }
-  
-  if (!dragging) return;
-  
-  const currentMouseAngle = getMouseAngle(e);
-  const delta = currentMouseAngle - lastMouseAngle;
-  
-  angle += delta;
-  lastMouseAngle = currentMouseAngle;
+
+  if (knobBig.dragging) {
+    const delta = shortestAngleDiff(a, knobBig.lastMouseAngle);
+    let newAngle = knobBig.angle + delta * dragPower;
+    knobBig.angle = clamp(newAngle, knobBig.minAngle, knobBig.maxAngle);
+    knobBig.lastMouseAngle = a;
+  }
 });
 
+
 canvas.addEventListener("mouseup", () => {
-  dragging = false;
+  knobSmall.dragging = false;
+  knobBig.dragging = false;
 });
 
 canvas.addEventListener("mouseleave", () => {
-  dragging = false;
+  knobSmall.dragging = false;
+  knobBig.dragging = false;
 });
 
+// ---------------------------
+//   BLUR & LOGIQUE DU PUZZLE
+// ---------------------------
 function updateBlurFromRotation() {
-  let normalizedAngle = angle % (Math.PI * 2);
-  if (normalizedAngle > Math.PI) normalizedAngle -= Math.PI * 2;
-  if (normalizedAngle < -Math.PI) normalizedAngle += Math.PI * 2;
-  
-  const diff = Math.abs(normalizedAngle);
-  blurAmount = (diff / Math.PI) * 20;
+  if (puzzleSolved) {
+    blurAmount = 0;
+    return;
+  }
+
+  const diffSmall = shortestAngleDiff(knobSmall.angle, knobSmall.targetAngle);
+  const diffBig   = shortestAngleDiff(knobBig.angle,   knobBig.targetAngle);
+
+  const absS = Math.abs(diffSmall);
+  const absB = Math.abs(diffBig);
+
+  // zone où le blur varie (jusqu'à ~45° de la cible)
+  const maxError = Math.PI / 4;
+  const normS = Math.min(absS / maxError, 1);
+  const normB = Math.min(absB / maxError, 1);
+
+  const error = (normS + normB) * 0.5; // 0 → 1
+  blurAmount = error * maxBlur;
+
+  // si les deux knobs sont quasi parfaits → puzzle résolu
+  const tolerance = degToRad(2); // ~2°
+  if (absS < tolerance && absB < tolerance) {
+    puzzleSolved = true;
+    knobSmall.angle = knobSmall.targetAngle;
+    knobBig.angle   = knobBig.targetAngle;
+    blurAmount = 0;
+  }
 }
 
+// ---------------------------
+//   DESSIN DU KNOB
+// ---------------------------
 function drawGraduatedCircle(
   radius,
   strokeWidth = 50,
@@ -87,82 +252,122 @@ function drawGraduatedCircle(
   majorScale = 0.5,
   minorScale = 0.25,
   handleLength = 90,
-  handleWidth = 50
+  handleWidth = 50,
+  angle = 0
 ) {
   ctx.save();
-  
+
+  // rotation du knob
+  ctx.rotate(angle);
+
+  // --- CERCLE ---
   ctx.beginPath();
   ctx.lineWidth = strokeWidth;
   ctx.strokeStyle = "black";
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.stroke();
-  
-  const base = radius + strokeWidth/2;
+
+  const base = radius + strokeWidth / 2;
   const half = strokeWidth;
-  let majorSize = half * majorScale;
-  let minorSize = half * minorScale;
-  
+
+  const majorSize = half * majorScale;
+  const minorSize = half * minorScale;
+
+  // --- GRADUATIONS ---
   for (let i = 0; i < tickCount; i++) {
     const isMajor = (i % 10 === 0);
     const size = isMajor ? majorSize : minorSize;
+
     ctx.beginPath();
     ctx.moveTo(0, base);
     ctx.lineTo(0, base - size);
     ctx.lineWidth = isMajor ? 5 : 2;
     ctx.strokeStyle = "white";
     ctx.stroke();
+
     ctx.rotate((Math.PI * 2) / tickCount);
   }
-  
+
+  // --- HANDLE ---
   ctx.beginPath();
   ctx.fillStyle = "black";
   ctx.strokeStyle = "black";
   ctx.lineWidth = 4;
+
   ctx.rect(
     -handleWidth / 2,
     -(base + handleLength),
     handleWidth,
     handleLength
   );
+
   ctx.fill();
   ctx.stroke();
-  
+
   ctx.restore();
 }
 
-function update(dt) {
-  updateBlurFromRotation();
-  
-  ctx.fillStyle = "red";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
-  ctx.save();
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  
+// ---------------------------
+//   NOMBRE "2" AU CENTRE
+// ---------------------------
+function number2() {
   ctx.save();
   ctx.filter = `blur(${blurAmount}px)`;
+
   ctx.fillStyle = "black";
-  ctx.font = `bold ${canvas.height * 0.4}px Helvetica Neue, Helvetica, Arial`;
+  ctx.font = `${canvas.height * 0.4}px Helvetica Neue, Helvetica, bold`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
   ctx.fillText("2", 0, 0);
+
+  ctx.filter = "none";
   ctx.restore();
-  
-  ctx.rotate(angle);
+}
+
+// ---------------------------
+//   BOUCLE UPDATE
+// ---------------------------
+function update(dt) {
+  const x = canvas.width / 2;
+  const y = canvas.height / 2;
+
+  updateBlurFromRotation();
+
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  number2();
+
+  // GRAND KNOB (fond)
   drawGraduatedCircle(
-    canvas.height * 0.3,
+    knobBig.radius,
+    100,
+    200,
+    0.55,
+    0.25,
+    100,
+    70,
+    knobBig.angle
+  );
+
+  // PETIT KNOB (par dessus)
+  drawGraduatedCircle(
+    knobSmall.radius,
     100,
     120,
     0.6,
     0.3,
-    80,
-    90
+    200,
+    90,
+    knobSmall.angle
   );
-  
+
   ctx.restore();
 }
 
-run(update);
 
 /*
 const ySpring = new Spring({
