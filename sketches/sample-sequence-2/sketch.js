@@ -5,6 +5,15 @@ const { renderer, input, math, run, finish } = createEngine()
 const { ctx, canvas } = renderer
 run(update)
 
+function update(dt){
+  ctx.fillStyle = "white"
+  ctx.textBaseline = "middle"
+  ctx.font = `${canvas.height}px Helvetica Neue, Helvetica , bold`
+  ctx.textAlign = "center"
+}
+
+
+/*
 const ySpring = new Spring({
   position: -canvas.height,
   target: 0,
@@ -118,3 +127,4 @@ function update(dt) {
 
 
 }
+*/
