@@ -18,7 +18,8 @@ const openSpeed = 4
 let canOutro = false
 let outroDelay = 0
 let finalDropProgress = 0     // 0 = pas encore descendu, 1 = descendu au max
-const finalDropSpeed = 3    // vitesse de la descente (tu peux tweaker)
+const finalDropSpeed = 1   // vitesse de la descente (tu peux tweaker)
+let blackRectProgress = 0  // pour le rectangle noir final
 
 
 // ---- SONS PORTE ----
@@ -146,11 +147,19 @@ function update(dt) {
     if (outroProgress > 1) outroProgress = 1
   }
   
-  // --- ANIM FINALE DU "3" APRÈS L'OUTRO ---
-  if (outroProgress >= 1 && finalDropProgress < 1) {
-    finalDropProgress += finalDropSpeed * dt
-    if (finalDropProgress > 1) finalDropProgress = 1
+// --- ANIM FINALE DU "3" APRÈS L'OUTRO ---
+if (outroProgress >= 1 && finalDropProgress < 1) {
+  finalDropProgress += finalDropSpeed * dt
+  if (finalDropProgress > 1) finalDropProgress = 1
+}
+
+// --- RECTANGLE NOIR FINAL ---
+if (finalDropProgress >= 1 && blackRectProgress < 1) {
+  blackRectProgress += finalDropSpeed * dt
+  if (blackRectProgress > 1) {
+    blackRectProgress = 1
   }
+}
 
 
   // --- GÉOMÉTRIE SALLE + PORTE ---
@@ -194,6 +203,15 @@ function update(dt) {
     ctx.fillText("3", w / 2, h / 2 + dropOffset)
     ctx.globalAlpha = 1
   }
+
+  // --- RECTANGLE NOIR FINAL (descend après le 3) ---
+if (blackRectProgress > 0) {
+  ctx.fillStyle = "black"
+  const rectDropDistance = h * 1
+  const rectY = -h + (blackRectProgress * rectDropDistance)
+  ctx.fillRect(0, rectY, w, h)
+}
+
   // --- PORTE ---
   if (outroProgress < 0.3) {
     const doorOpacity = outroProgress > 0 ? 1 - (outroProgress / 0.3) : 1
@@ -284,6 +302,12 @@ function update(dt) {
 
 
   }
+
+  // Appelle finish() quand l'écran est complètement noir
+if (blackRectProgress >= 1) {
+  finish()
+}
+
 }
 
 

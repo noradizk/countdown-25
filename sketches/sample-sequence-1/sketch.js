@@ -6,149 +6,145 @@ const { ctx, canvas } = renderer
 run(update)
 
 
-// Paramètres de la carte
-const cardWidth = 160;
-const cardHeight = 220;
-const cardCenterX = canvas.width / 2;
-const cardCenterY = canvas.height / 2;
-
-let isFlipping = false;
-let flipStartTime = 0;
-const flipDuration = 600; // ms
-let showingFront = true;
-
-// Dessine une carte avec coins arrondis
-function drawRoundedCard(x, y, w, h, radius) {
-  const r = Math.min(radius, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.arcTo(x + w, y, x + w, y + r, r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-  ctx.lineTo(x + r, y + h);
-  ctx.arcTo(x, y + h, x, y + h - r, r);
-  ctx.lineTo(x, y + r);
-  ctx.arcTo(x, y, x + r, y, r);
-  ctx.closePath();
-}
-
-function renderCard(side, scaleX) {
-  ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // On se place au centre de la carte
-  ctx.translate(cardCenterX, cardCenterY);
-  ctx.scale(scaleX, 1); // scaleX va de 1 -> 0 -> -1 pour le flip
-
-  // Dessin de la carte en coordonnées locales (centre = 0,0)
-  const x = -cardWidth / 2;
-  const y = -cardHeight / 2;
-
-  drawRoundedCard(x, y, cardWidth, cardHeight, 16);
-
-  if (side === 'front') {
-    // Face avant
-    const grad = ctx.createLinearGradient(x, y, x + cardWidth, y + cardHeight);
-    grad.addColorStop(0, '#ff6b6b');
-    grad.addColorStop(1, '#feca57');
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#ffffff';
-    ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('FRONT', 0, 0);
-  } else {
-    // Face arrière
-    const grad = ctx.createLinearGradient(x, y, x + cardWidth, y + cardHeight);
-    grad.addColorStop(0, '#1dd1a1');
-    grad.addColorStop(1, '#5f27cd');
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#ffffff';
-    ctx.stroke();
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 24px system-ui';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('BACK', 0, 0);
-  }
-
-  ctx.restore();
-}
-
-function renderStatic() {
-  renderCard(showingFront ? 'front' : 'back', 1);
-}
-
-// Animation avec requestAnimationFrame
-function animateFlip(timestamp) {
-  if (!isFlipping) return;
-
-  if (!flipStartTime) {
-    flipStartTime = timestamp;
-  }
-
-  const elapsed = timestamp - flipStartTime;
-  let t = elapsed / flipDuration;
-  if (t > 1) t = 1;
-
-  // Angle de 0 à PI
-  const angle = t * Math.PI;
-  const scaleX = Math.cos(angle);
-
-  // Détermine si on dessine la face avant ou arrière
-  const side = angle < Math.PI / 2
-    ? (showingFront ? 'front' : 'back')
-    : (!showingFront ? 'front' : 'back');
-
-  renderCard(side, scaleX);
-
-  if (t < 1) {
-    requestAnimationFrame(animateFlip);
-  } else {
-    // Fin de l’animation, on inverse l’état
-    showingFront = !showingFront;
-    isFlipping = false;
-    flipStartTime = 0;
-    renderStatic();
-  }
-}
-
-// Détection du clic sur la carte
-canvas.addEventListener('click', (e) => {
-  if (isFlipping) return; // éviter de spam pendant le flip
-
-  const rect = canvas.getBoundingClientRect();
-  const mouseX = e.clientX - rect.left;
-  const mouseY = e.clientY - rect.top;
-
-  // On teste avec un rectangle simple autour de la carte
-  const left = cardCenterX - cardWidth / 2;
-  const right = cardCenterX + cardWidth / 2;
-  const top = cardCenterY - cardHeight / 2;
-  const bottom = cardCenterY + cardHeight / 2;
-
-  const isInside =
-    mouseX >= left && mouseX <= right &&
-    mouseY >= top && mouseY <= bottom;
-
-  if (isInside) {
-    isFlipping = true;
-    flipStartTime = 0;
-    requestAnimationFrame(animateFlip);
-  }
+// Spring simple entre 0 et 1
+const spring = new Spring({
+	position: 0,
+	frequency: 2.0,
+	halfLife: 0.25
 });
 
-// Premier rendu
-renderStatic();
+const cardWidth  = 160;
+const cardHeight = 220;
+
+// easing
+function easeOutCubic(t) {
+	return 1 - Math.pow(1 - t, 3);
+}
+
+// Carte déformée + face (coords locales, 0,0 = centre)
+function drawBentCard(bendAmount, side) {
+	const w = cardWidth;
+	const h = cardHeight;
+
+	const x = -w / 2;
+	const y = -h / 2;
+
+	const left   = x;
+	const right  = x + w;
+	const top    = y;
+	const bottom = y + h;
+
+	const bend = bendAmount * 20; // plus grand = plus tordu
+
+	const topCtrlY    = top - bend;
+	const bottomCtrlY = bottom + bend;
+	const leftCtrlX   = left - bend * 0.4;
+	const rightCtrlX  = right + bend * 0.4;
+
+	ctx.beginPath();
+
+	// bord haut
+	ctx.moveTo(left, top);
+	ctx.quadraticCurveTo(
+		(left + right) / 2, topCtrlY,
+		right, top
+	);
+
+	// bord droit
+	ctx.quadraticCurveTo(
+		rightCtrlX, (top + bottom) / 2,
+		right, bottom
+	);
+
+	// bord bas
+	ctx.quadraticCurveTo(
+		(left + right) / 2, bottomCtrlY,
+		left, bottom
+	);
+
+	// bord gauche
+	ctx.quadraticCurveTo(
+		leftCtrlX, (top + bottom) / 2,
+		left, top
+	);
+
+	ctx.closePath();
+
+	// Style selon la face
+	let grad;
+	if (side === "front") {
+		grad = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+		grad.addColorStop(0, "#ff6b6b");
+		grad.addColorStop(1, "#feca57");
+	} else {
+		grad = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+		grad.addColorStop(0, "#1dd1a1");
+		grad.addColorStop(1, "#5f27cd");
+	}
+
+	ctx.fillStyle = grad;
+	ctx.fill();
+	ctx.lineWidth = 2;
+	ctx.strokeStyle = "white";
+	ctx.stroke();
+
+	// texte au centre (juste pour voir le flip)
+	ctx.fillStyle = "white";
+	ctx.font = "bold 28px system-ui";
+	ctx.textAlign = "center";
+	ctx.textBaseline = "middle";
+	ctx.fillText(side.toUpperCase(), 0, 0);
+}
+
+// ================== UPDATE ==================
+function update(dt) {
+	
+	// 1) spring 0 -> 1
+	if (input.isPressed()) {
+		spring.target = 1;
+	} else {
+		spring.target = 0;
+	}
+	spring.step(dt);
+
+	let t = spring.position;
+	if (t < 0) t = 0;
+	if (t > 1) t = 1;
+
+	// 2) flip + déformation
+	const flipAngle = t * Math.PI;        // 0 → π
+	const scaleX = Math.cos(flipAngle);   // flip (se referme / rouvre)
+	const tilt = 0.25 * Math.sin(flipAngle); // petite diagonale
+
+	// courbure max au milieu du flip
+	const bendProgress = Math.sin(flipAngle); // 0 → 1 → 0
+	const bend = easeOutCubic(Math.max(0, bendProgress));
+
+	// face visible (avant la moitié / après)
+	const side = t < 0.5 ? "front" : "back";
+
+	// 3) clear
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.fillStyle = "black";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+	// 4) dessine la carte
+	const cx = canvas.width  / 2;
+	const cy = canvas.height / 2 + 40;
+
+	ctx.save();
+	ctx.translate(cx, cy);
+	ctx.rotate(tilt);
+
+	// flip horizontal (petit hack pour éviter trop de miroir visuel)
+	const sx = Math.abs(scaleX);
+	const dir = scaleX < 0 ? -1 : 1;
+	ctx.scale(dir * sx, 1);
+
+	drawBentCard(bend, side);
+	ctx.restore();
+}
+
 /*
 const spring = new Spring({
 	position: -canvas.width,

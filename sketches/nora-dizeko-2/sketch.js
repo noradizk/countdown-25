@@ -13,6 +13,17 @@ const maxBlur = 100;
 
 let blurAmount = maxBlur;
 let puzzleSolved = false;
+// --- INTRO FOND NOIR ---
+let introProgress = 0;      // 0 = full noir, 1 = noir disparu
+const outroDuration = 2;   // durée totale de l’outro en secondes
+let outroDone = false;
+const introDuration = 2;  // durée de l'intro en secondes (tu peux tweaker)
+let introDone = false;
+
+// --- OUTRO ---
+let outroTime = 0;
+let isOutroPlaying = false;
+let hasFinishCalled = false;
 
 // ---------------------------
 //   HELPERS ANGLES / MATHS
@@ -224,24 +235,25 @@ function updateBlurFromRotation() {
   const absS = Math.abs(diffSmall);
   const absB = Math.abs(diffBig);
 
-  // zone où le blur varie (jusqu'à ~45° de la cible)
   const maxError = Math.PI / 4;
   const normS = Math.min(absS / maxError, 1);
   const normB = Math.min(absB / maxError, 1);
 
-  const error = (normS + normB) * 0.5; // 0 → 1
+  const error = (normS + normB) * 0.5;
   blurAmount = error * maxBlur;
 
-  // si les deux knobs sont quasi parfaits → puzzle résolu
-  const tolerance = degToRad(2); // ~2°
+  const tolerance = degToRad(2);
   if (absS < tolerance && absB < tolerance) {
     puzzleSolved = true;
     knobSmall.angle = knobSmall.targetAngle;
-    knobBig.angle   = knobBig.targetAngle;
+    knobBig.angle = knobBig.targetAngle;
     blurAmount = 0;
+    
+    // Lance l'outro
+    isOutroPlaying = true;
+    outroTime = 0;
   }
 }
-
 // ---------------------------
 //   DESSIN DU KNOB
 // ---------------------------
@@ -330,18 +342,60 @@ function number2() {
 function update(dt) {
   const x = canvas.width / 2;
   const y = canvas.height / 2;
+  
+  // --- ANIM INTRO (fond noir qui descend) ---
+  if (!introDone) {
+    introProgress += dt / introDuration;
+    if (introProgress >= 1) {
+      introProgress = 1;
+      introDone = true;
+    }
+  }
+
+  // offset vertical de toute la scène pendant l'intro
+  // introProgress : 0 -> 1  => offset : -canvas.height -> 0
+  let sceneOffsetY = 0;
+  if (!introDone) {
+    sceneOffsetY = (introProgress - 1) * canvas.height;
+  }
+
 
   updateBlurFromRotation();
+  // --- OUTRO TIMER ---
+if (isOutroPlaying && !hasFinishCalled) {
+  outroTime += dt;
+}
 
+const tHideBig = 0.4;
+const tHideSmall = 0.8;
+const tCutBlack = 1.2;
+
+// Appel finish()
+if (isOutroPlaying && outroTime >= tCutBlack && !hasFinishCalled) {
+  hasFinishCalled = true;
+  finish();
+}
+
+// PAR :
+if (!isOutroPlaying || outroTime < tCutBlack) {
   ctx.fillStyle = "white";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+} else {
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+ctx.save();
+ctx.translate(x, y + sceneOffsetY);
 
-  ctx.save();
-  ctx.translate(x, y);
+const showBig = !isOutroPlaying || outroTime < tHideBig;
+const showSmall = !isOutroPlaying || outroTime < tHideSmall;
+const show2 = !isOutroPlaying || outroTime < tCutBlack;
 
+if (show2) {
   number2();
+}
 
-  // GRAND KNOB (fond)
+if (showBig) {
   drawGraduatedCircle(
     knobBig.radius,
     100,
@@ -352,8 +406,9 @@ function update(dt) {
     70,
     knobBig.angle
   );
+}
 
-  // PETIT KNOB (par dessus)
+if (showSmall) {
   drawGraduatedCircle(
     knobSmall.radius,
     100,
@@ -364,11 +419,21 @@ function update(dt) {
     90,
     knobSmall.angle
   );
-
-  ctx.restore();
 }
 
+ctx.restore();
 
+// --- FOND NOIR D'INTRO QUI DROP PAR-DESSUS TOUT ---
+if (!introDone) {
+  const yDrop = introProgress * canvas.height;
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // coords écran
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, yDrop, canvas.width, canvas.height);
+  ctx.restore();
+  } 
+}
 /*
 const ySpring = new Spring({
   position: -canvas.height,
