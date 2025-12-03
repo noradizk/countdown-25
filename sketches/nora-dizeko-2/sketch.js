@@ -13,17 +13,26 @@ const maxBlur = 100;
 
 let blurAmount = maxBlur;
 let puzzleSolved = false;
-// --- INTRO FOND NOIR ---
-let introProgress = 0;      // 0 = full noir, 1 = noir disparu
-const outroDuration = 2;   // durée totale de l’outro en secondes
-let outroDone = false;
-const introDuration = 2;  // durée de l'intro en secondes (tu peux tweaker)
-let introDone = false;
-
-// --- OUTRO ---
-let outroTime = 0;
-let isOutroPlaying = false;
 let hasFinishCalled = false;
+
+
+// ---------------------------
+//   INTRO / OUTRO
+// ---------------------------
+
+// Durée en secondes (tweak comme tu veux)
+const INTRO_DURATION = 1.5;       // temps pour que les knobs entrent dans la view
+const OUTRO_DURATION = 1.5;       // temps pour qu'ils sortent de la view
+const POST_SOLVE_DELAY = 0.8;     // délai après la résolution avant de lancer l'outro
+
+let introProgress = 0;            // 0 → en bas, 1 → en place
+let outroProgress = 0;            // 0 → en place, 1 → hors de l'écran
+let isIntroDone = false;
+let isOutroPlaying = false;
+let isOutroDone = false;
+
+// temps écoulé depuis que le puzzle est résolu
+let solvedTime = 0;
 
 // ---------------------------
 //   HELPERS ANGLES / MATHS
@@ -43,68 +52,83 @@ function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
+// ---------------------------
+//   CONFIG ANGLES
+// ---------------------------
 const totalSpanDeg = 170;
 const halfSpanRad = degToRad(totalSpanDeg / 2);
-const centerSmall = degToRad(0);
+const centerSmall = 0;                 // en radians
 const centerBig   = centerSmall + Math.PI;
 
 // ---------------------------
-//   KNOBS
+//   KNOB CONFIG + CREATION
 // ---------------------------
-let knobSmall = {
-  angle: centerSmall - halfSpanRad,       // départ au bord
-  dragging: false,
-  lastMouseAngle: 0,
-  radius: canvas.height * 0.30,
-
-  minAngle: centerSmall - halfSpanRad,
-  maxAngle: centerSmall + halfSpanRad,
-
-  centerAngle: centerSmall,
-  range: halfSpanRad,
-  targetAngle: centerSmall              // sera randomisé après
+const BIG_KNOB_STYLE = {
+  strokeWidth: 100,
+  tickCount: 200,
+  majorScale: 0.55,
+  minorScale: 0.25,
+  handleLength: 100,
+  handleWidth: 70
 };
 
-let knobBig = {
-  angle: centerBig + halfSpanRad,        // départ au bord
-  dragging: false,
-  lastMouseAngle: 0,
-  radius: canvas.height * 0.35,
-
-  minAngle: centerBig - halfSpanRad,
-  maxAngle: centerBig + halfSpanRad,
-
-  centerAngle: centerBig,
-  range: halfSpanRad,
-  targetAngle: centerBig                // sera randomisé après
+const SMALL_KNOB_STYLE = {
+  strokeWidth: 100,
+  tickCount: 120,
+  majorScale: 0.6,
+  minorScale: 0.3,
+  handleLength: 200,
+  handleWidth: 90
 };
 
+function createKnob(centerAngle, radius, range, startAtMax = false) {
+  const minAngle = centerAngle - range;
+  const maxAngle = centerAngle + range;
+
+  return {
+    angle: startAtMax ? maxAngle : minAngle,
+    dragging: false,
+    lastMouseAngle: 0,
+
+    radius,
+    minAngle,
+    maxAngle,
+    centerAngle,
+    range,
+
+    targetAngle: centerAngle // sera randomisé ensuite
+  };
+}
+
+const knobSmall = createKnob(centerSmall, canvas.height * 0.30, halfSpanRad, false);
+const knobBig   = createKnob(centerBig,   canvas.height * 0.35, halfSpanRad, true);
 
 // ---------------------------
 //   RANDOMISATION DE LA SOLUTION
 // ---------------------------
-
 function randomizeSolution() {
-  const marginDeg = 10;                // éviter les bords
+  const marginDeg = 10; // éviter les bords
   const margin = degToRad(marginDeg);
 
-  // petit knob : random dans SA plage verticale
+  // petit knob
   const minSmall = knobSmall.minAngle + margin;
   const maxSmall = knobSmall.maxAngle - margin;
-  const randS = Math.random();
-  knobSmall.targetAngle = minSmall + randS * (maxSmall - minSmall);
+  knobSmall.targetAngle = minSmall + Math.random() * (maxSmall - minSmall);
 
-  // grand knob : random dans SA plage opposée
+  // grand knob
   const minBig = knobBig.minAngle + margin;
   const maxBig = knobBig.maxAngle - margin;
-  const randB = Math.random();
-  knobBig.targetAngle = minBig + randB * (maxBig - minBig);
+  knobBig.targetAngle = minBig + Math.random() * (maxBig - minBig);
 
-  // positions de départ (optionnel)
+  // positions de départ
   knobSmall.angle = knobSmall.minAngle;
   knobBig.angle   = knobBig.maxAngle;
+
+  blurAmount = maxBlur;
+  puzzleSolved = false;
+  hasFinishCalled = false;
 }
-// on lance une solution aléatoire au début
+
 randomizeSolution();
 
 // ---------------------------
@@ -131,45 +155,46 @@ function getMouseAngle(e) {
 }
 
 // ---------------------------
-//   HITTEST SUR LA POIGNÉE
+//   HITTEST SUR LES POIGNÉES
 // ---------------------------
-function isOnHandle(e, knob, strokeWidth, handleLength, handleWidth) {
+function isOnHandle(e, knob, style) {
   const { x, y } = getMousePosCanvas(e);
 
-  // passer dans le repère du knob : rotation inverse
+  // repère du knob : rotation inverse
   const cos = Math.cos(-knob.angle);
   const sin = Math.sin(-knob.angle);
   const xr = x * cos - y * sin;
   const yr = x * sin + y * cos;
 
-  const base = knob.radius + strokeWidth / 2;
+  const base = knob.radius + style.strokeWidth / 2;
 
-  const rectX = -handleWidth / 2;
-  const rectY = -(base + handleLength);
-  const rectW = handleWidth;
-  const rectH = handleLength;
+  const rectX = -style.handleWidth / 2;
+  const rectY = -(base + style.handleLength);
+  const rectW = style.handleWidth;
+  const rectH = style.handleLength;
 
   return (
-    xr >= rectX &&
-    xr <= rectX + rectW &&
-    yr >= rectY &&
-    yr <= rectY + rectH
+    xr >= rectX && xr <= rectX + rectW &&
+    yr >= rectY && yr <= rectY + rectH
   );
 }
 
 function isOnBigHandle(e) {
-  // mêmes paramètres que drawGraduatedCircle du grand knob
-  return isOnHandle(e, knobBig, 100, 100, 70);
+  return isOnHandle(e, knobBig, BIG_KNOB_STYLE);
 }
 
 function isOnSmallHandle(e) {
-  // mêmes paramètres que drawGraduatedCircle du petit knob
-  return isOnHandle(e, knobSmall, 100, 200, 90);
+  return isOnHandle(e, knobSmall, SMALL_KNOB_STYLE);
 }
 
 // ---------------------------
 //   EVENTS SOURIS
 // ---------------------------
+function stopDragging() {
+  knobSmall.dragging = false;
+  knobBig.dragging = false;
+}
+
 canvas.addEventListener("mousedown", (e) => {
   if (puzzleSolved) return;
 
@@ -181,6 +206,7 @@ canvas.addEventListener("mousedown", (e) => {
     knobBig.lastMouseAngle = a;
     return;
   }
+
   // PETIT KNOB
   if (isOnSmallHandle(e)) {
     knobSmall.dragging = true;
@@ -196,33 +222,31 @@ canvas.addEventListener("mousemove", (e) => {
 
   if (knobSmall.dragging) {
     const delta = shortestAngleDiff(a, knobSmall.lastMouseAngle);
-    let newAngle = knobSmall.angle + delta * dragPower;
+    const newAngle = knobSmall.angle + delta * dragPower;
     knobSmall.angle = clamp(newAngle, knobSmall.minAngle, knobSmall.maxAngle);
     knobSmall.lastMouseAngle = a;
   }
 
   if (knobBig.dragging) {
     const delta = shortestAngleDiff(a, knobBig.lastMouseAngle);
-    let newAngle = knobBig.angle + delta * dragPower;
+    const newAngle = knobBig.angle + delta * dragPower;
     knobBig.angle = clamp(newAngle, knobBig.minAngle, knobBig.maxAngle);
     knobBig.lastMouseAngle = a;
   }
 });
 
-
-canvas.addEventListener("mouseup", () => {
-  knobSmall.dragging = false;
-  knobBig.dragging = false;
-});
-
-canvas.addEventListener("mouseleave", () => {
-  knobSmall.dragging = false;
-  knobBig.dragging = false;
-});
+canvas.addEventListener("mouseup", stopDragging);
+canvas.addEventListener("mouseleave", stopDragging);
 
 // ---------------------------
 //   BLUR & LOGIQUE DU PUZZLE
 // ---------------------------
+function triggerFinish() {
+  if (hasFinishCalled) return;
+  hasFinishCalled = true;
+  finish();
+}
+
 function updateBlurFromRotation() {
   if (puzzleSolved) {
     blurAmount = 0;
@@ -244,28 +268,27 @@ function updateBlurFromRotation() {
 
   const tolerance = degToRad(2);
   if (absS < tolerance && absB < tolerance) {
+    // Puzzle résolu → on verrouille les angles, on enlève le blur
     puzzleSolved = true;
+    solvedTime = 0; // reset du timer de latence
     knobSmall.angle = knobSmall.targetAngle;
     knobBig.angle = knobBig.targetAngle;
     blurAmount = 0;
-    
-    // Lance l'outro
-    isOutroPlaying = true;
-    outroTime = 0;
   }
 }
+
 // ---------------------------
-//   DESSIN DU KNOB
+//   DESSIN DU KNOB - CIRCLE
 // ---------------------------
 function drawGraduatedCircle(
   radius,
-  strokeWidth = 50,
-  tickCount = 120,
-  majorScale = 0.5,
-  minorScale = 0.25,
-  handleLength = 90,
-  handleWidth = 50,
-  angle = 0
+  strokeWidth,
+  tickCount,
+  majorScale,
+  minorScale,
+  handleLength,
+  handleWidth,
+  angle
 ) {
   ctx.save();
 
@@ -275,7 +298,7 @@ function drawGraduatedCircle(
   // --- CERCLE ---
   ctx.beginPath();
   ctx.lineWidth = strokeWidth;
-  ctx.strokeStyle = "black";
+  ctx.strokeStyle = "gray";
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.stroke();
 
@@ -302,8 +325,8 @@ function drawGraduatedCircle(
 
   // --- HANDLE ---
   ctx.beginPath();
-  ctx.fillStyle = "black";
-  ctx.strokeStyle = "black";
+  ctx.fillStyle = "gray";
+  ctx.strokeStyle = "gray";
   ctx.lineWidth = 4;
 
   ctx.rect(
@@ -318,6 +341,65 @@ function drawGraduatedCircle(
 
   ctx.restore();
 }
+
+function drawKnob(knob, style) {
+  drawGraduatedCircle(
+    knob.radius,
+    style.strokeWidth,
+    style.tickCount,
+    style.majorScale,
+    style.minorScale,
+    style.handleLength,
+    style.handleWidth,
+    knob.angle
+  );
+}
+
+// ---------------------------
+//   WHITE BACKGROUND LENS
+// ---------------------------
+
+function drawBackground() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // reset transform
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+
+// le "2" centré écran (indépendant des translations des knobs)
+function drawNumber2AtCenter(cx, cy) {
+  ctx.save();
+  ctx.translate(cx, cy); // number2() dessine autour de (0,0)
+  number2();
+  ctx.restore();
+}
+
+
+// disque blanc à l’intérieur du petit cercle (coordonnées globales)
+function drawInnerSmallCircle(cx, cy) {
+  const innerSmallRadius =
+    knobSmall.radius - SMALL_KNOB_STYLE.strokeWidth / 2 + 1; // bord interne
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerSmallRadius, 0, Math.PI * 2);
+  ctx.fillStyle = "white";
+  ctx.fill();
+}
+
+
+// groupe des knobs (offsetX/offsetY serviront plus tard pour l’intro/outro)
+function drawKnobsScene(cx, cy, offsetX = 0, offsetY = 0) {
+  ctx.save();
+  ctx.translate(cx + offsetX, cy + offsetY);
+
+  drawKnob(knobBig, BIG_KNOB_STYLE);
+  drawKnob(knobSmall, SMALL_KNOB_STYLE);
+
+  ctx.restore();
+}
+
+
+
 
 // ---------------------------
 //   NOMBRE "2" AU CENTRE
@@ -336,216 +418,88 @@ function number2() {
   ctx.restore();
 }
 
+
+
 // ---------------------------
 //   BOUCLE UPDATE
 // ---------------------------
 function update(dt) {
-  const x = canvas.width / 2;
-  const y = canvas.height / 2;
-  
-  // --- ANIM INTRO (fond noir qui descend) ---
-  if (!introDone) {
-    introProgress += dt / introDuration;
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+
+  // --- LOGIQUE DU PUZZLE (blur + détection de résolution) ---
+  updateBlurFromRotation();
+
+  // --- GESTION INTRO ---
+  if (!isIntroDone) {
+    introProgress += dt / INTRO_DURATION;
     if (introProgress >= 1) {
       introProgress = 1;
-      introDone = true;
+      isIntroDone = true;
     }
   }
 
-  // offset vertical de toute la scène pendant l'intro
-  // introProgress : 0 -> 1  => offset : -canvas.height -> 0
-  let sceneOffsetY = 0;
-  if (!introDone) {
-    sceneOffsetY = (introProgress - 1) * canvas.height;
-  }
-
-
-  updateBlurFromRotation();
-  // --- OUTRO TIMER ---
-if (isOutroPlaying && !hasFinishCalled) {
-  outroTime += dt;
-}
-
-const tHideBig = 0.4;
-const tHideSmall = 0.8;
-const tCutBlack = 1.2;
-
-// Appel finish()
-if (isOutroPlaying && outroTime >= tCutBlack && !hasFinishCalled) {
-  hasFinishCalled = true;
-  finish();
-}
-
-// PAR :
-if (!isOutroPlaying || outroTime < tCutBlack) {
-  ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-} else {
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
-ctx.save();
-ctx.translate(x, y + sceneOffsetY);
-
-const showBig = !isOutroPlaying || outroTime < tHideBig;
-const showSmall = !isOutroPlaying || outroTime < tHideSmall;
-const show2 = !isOutroPlaying || outroTime < tCutBlack;
-
-if (show2) {
-  number2();
-}
-
-if (showBig) {
-  drawGraduatedCircle(
-    knobBig.radius,
-    100,
-    200,
-    0.55,
-    0.25,
-    100,
-    70,
-    knobBig.angle
-  );
-}
-
-if (showSmall) {
-  drawGraduatedCircle(
-    knobSmall.radius,
-    100,
-    120,
-    0.6,
-    0.3,
-    200,
-    90,
-    knobSmall.angle
-  );
-}
-
-ctx.restore();
-
-// --- FOND NOIR D'INTRO QUI DROP PAR-DESSUS TOUT ---
-if (!introDone) {
-  const yDrop = introProgress * canvas.height;
-
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0); // coords écran
-  ctx.fillStyle = "black";
-  ctx.fillRect(0, yDrop, canvas.width, canvas.height);
-  ctx.restore();
-  } 
-}
-/*
-const ySpring = new Spring({
-  position: -canvas.height,
-  target: 0,
-  frequency: 1.5,
-  halfLife: 0.05
-})
-const scaleSpring = new Spring({
-  position: 1,
-  frequency: 1.5,
-  halfLife: 0.1
-})
-const rotationSpring = new Spring({
-  position: 180,
-  frequency: 0.5,
-  halfLife: 0.805,
-  wrap: 360
-})
-
-let fallPos = 0
-let fallVel = 0
-
-const State = {
-  WaitingForInput: "waitingForInput",
-  Interactive: "interactive",
-  Falling: "falling",
-  Finished: "finished"
-}
-let currentState = State.WaitingForInput
-let startInputX = 0
-
-function update(dt) {
-
-
-
-  let nextState = undefined
-  switch (currentState) {
-    case State.WaitingForInput: {
-
-      if (input.hasStarted()) {
-        startInputX = input.getX()
-        nextState = State.Interactive
-      }
-      break
-    }
-
-    case State.Interactive: {
-      const xOffset = input.getX() - startInputX
-      rotationSpring.target = math.map(xOffset, 0, canvas.width, 0, 360) + 180
-      rotationSpring.step(dt)
-      if (Math.abs(math.deltaAngleDeg(rotationSpring.position, 0)) < 5 && Math.abs(rotationSpring.velocity, 0) < 10)
-        nextState = State.Falling
-      break
-    }
-
-    case State.Falling: {
-      const drag = 0.1
-      const gravity = canvas.height * 3
-      const rotationForce = 200 * Math.sign(rotationSpring.velocity)
-      rotationSpring.velocity += rotationForce * dt;
-      rotationSpring.velocity *= Math.exp(-dt * drag)
-      rotationSpring.position += rotationSpring.velocity * dt
-      fallVel += gravity * dt;
-      fallPos += fallVel * dt;
-      if (fallPos > canvas.height)
-        nextState = State.Finished
-      break
-    }
-
-    case State.Finished: {
-      break
+  // --- GESTION LATENCE APRÈS RÉSOLUTION ---
+  if (puzzleSolved && !isOutroPlaying && !isOutroDone) {
+    solvedTime += dt;
+    if (solvedTime >= POST_SOLVE_DELAY) {
+      isOutroPlaying = true;
+      outroProgress = 0;
     }
   }
 
-  if (nextState !== undefined) {
-
-    currentState = nextState
-    switch (currentState) {
-      case State.Finished:
-
-        finish()
-        break;
-      case State.Falling:
-
-        scaleSpring.target = 1.2
-        break;
+  // --- GESTION OUTRO ---
+  if (isOutroPlaying && !isOutroDone) {
+    outroProgress += dt / OUTRO_DURATION;
+    if (outroProgress >= 1) {
+      outroProgress = 1;
+      isOutroDone = true;
+      triggerFinish(); // appel de finish à la fin de l'outro
     }
-    // change state
   }
 
+  // ---------------------------
+  //   CALCUL DES OFFSETS
+  // ---------------------------
+  let offsetX = 0;
+  let offsetY = 0;
 
-  ySpring.step(dt)
-  scaleSpring.step(dt)
+  // Intro : les knobs viennent du bas
+  if (!isIntroDone) {
+    const t = introProgress; // 0 → 1
+    const startOffsetY = h * 0.6;  // à tweaker : distance depuis le bas
+    const eased = t * t * (3 - 2 * t); // easeInOut simple
+    offsetY = (1 - eased) * startOffsetY; // descend jusqu'à 0
+  }
+  // Outro : les knobs continuent vers le haut
+  else if (isOutroPlaying) {
+    const t = outroProgress; // 0 → 1
+    const endOffsetY = h * 1; // distance vers le haut
+    const eased = t * t;        // easeIn
+    offsetY = -eased * endOffsetY; // 0 → -endOffsetY
+  }
 
-  const x = canvas.width / 2;
-  const y = canvas.height / 2 + fallPos;
-  const rot = rotationSpring.position
-  const scale = scaleSpring.position
+  // ---------------------------
+  //   DESSIN
+  // ---------------------------
 
-  ctx.fillStyle = "black"
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  // 1) fond noir
+  drawBackground();
 
+  // 2) ROND BLANC qui suit les knobs
+  const circleX = cx + offsetX;
+  const circleY = cy + offsetY;
+  drawInnerSmallCircle(circleX, circleY);
 
-  ctx.fillStyle = "white"
-  ctx.textBaseline = "middle"
-  ctx.font = `${canvas.height}px Helvetica Neue, Helvetica , bold`
-  ctx.textAlign = "center"
-  ctx.translate(x, y + ySpring.position)
-  ctx.rotate(math.toRadian(rot))
-  ctx.scale(scale, scale)
-  ctx.fillText("2", 0, 0)
+  // 3) NUMÉRO 2 au centre, fixe
+  drawNumber2AtCenter(cx, cy);
 
-
+  // 4) KNOBS par-dessus, avec le même offset que le rond blanc
+  drawKnobsScene(cx, cy, offsetX, offsetY);
 }
-*/
+
+
+
+
