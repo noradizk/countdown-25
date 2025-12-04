@@ -32,6 +32,7 @@ const INTRO_DROP_DELAY = 250      // ms entre chaque carte qui commence à tombe
 const INTRO_CARD_DROP_TIME = 700  // ms pour qu'une carte ait le temps d'atteindre sa place
 const INTRO_REVEAL_DELAY = 300    // ms après la fin des drops avant de retourner la carte 1
 const INTRO_FACE_TIME = 900       // ms pendant lesquels la carte 1 reste face visible
+let introstarted = false
 
 // ==========================
 //  DÉFAITE / SHUFFLE
@@ -147,7 +148,7 @@ function startIntroDelayed() {
   // On attend quelques frames avant de déclencher l'animation
   setTimeout(() => {
     startIntro()
-  }, 50)
+  }, 2000)
 }
 
 // ==========================
@@ -203,7 +204,6 @@ function startIntro() {
 
 // premier setup
 assignRandomValues()
-startIntro()
 
 // ==========================
 //  EASING
@@ -566,6 +566,10 @@ function drawAnimatedCard(card, dt) {
 //  BOUCLE UPDATE
 // ==========================
 function update(dt) {
+  if(!introstarted){
+    startIntro();
+    introstarted=true;
+  }
   // anim de victoire (zoom carte gagnante)
   if (winningCard && !winAnimationDone) {
     winAnimTime += dt

@@ -1,7 +1,7 @@
 import { createEngine } from "../_shared/engine.js"
 import { Spring } from "../_shared/spring.js"
 
-const { renderer, input, math, run, finish, } = createEngine()
+const { renderer, input, math, run, finish, pixelRatio, audio} = createEngine()
 const { ctx, canvas } = renderer
 run(update)
 
@@ -33,24 +33,10 @@ let blackRectProgress = 0
 // =====================
 // SONS PORTE
 // =====================
-const doorOpenSound = new Audio("sketches/sample-audio/assets/son-porte-ouverte.mp3")
-const doorCloseSound = new Audio("sketches/sample-audio/assets/son-porte-fermee.mp3")
 
-// (optionnel) tu peux régler le volume
-doorOpenSound.volume = 1.0
-doorCloseSound.volume = 1.0
+const doorOpen = await audio.load("audio/ouverte.mp3");
 
-function playDoorSound(isOpening) {
-  const s = isOpening ? doorOpenSound : doorCloseSound
 
-  // On remet au début pour que le son rejoue entièrement
-  s.currentTime = 0
-
-  s.play().catch((err) => {
-    // Certains navigateurs bloquent si l'utilisateur n'a pas encore interagi
-    console.warn("Lecture audio bloquée :", err)
-  })
-}
 
 
 // =====================
@@ -152,7 +138,8 @@ function endDrag() {
 
   // Si changement d'état → son
   if (isOpen !== wasOpen) {
-    playDoorSound(isOpen)
+    console.log("SON ?")
+    doorOpen.play({ rate:1, volume: 1})
   }
 }
 
@@ -240,7 +227,7 @@ function drawFinalNumberThree(geom) {
   const textProgress = (introProgress - 0.5) / 0.5
   ctx.globalAlpha = Math.min(Math.max(textProgress, 0), 1)
 
-  const fontSize = roomHeight * 0.7
+  const fontSize = (roomHeight /pixelRatio)* 0.4
   ctx.fillStyle = "black"
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
@@ -252,8 +239,9 @@ function drawFinalNumberThree(geom) {
 
   ctx.fillText("3", w / 2, h / 2 + dropOffset)
   ctx.globalAlpha = 1
+ 
 }
-
+ 
 function drawBlackClosingRect(geom) {
   const { w, h } = geom
   if (blackRectProgress <= 0) return
