@@ -33,16 +33,25 @@ let blackRectProgress = 0
 // =====================
 // SONS PORTE
 // =====================
-const doorOpenSound = new Audio("audio/")
-const doorCloseSound = new Audio("sounds/door_close.mp3")
+const doorOpenSound = new Audio("sketches/sample-audio/assets/son-porte-ouverte.mp3")
+const doorCloseSound = new Audio("sketches/sample-audio/assets/son-porte-fermee.mp3")
+
+// (optionnel) tu peux régler le volume
+doorOpenSound.volume = 1.0
+doorCloseSound.volume = 1.0
 
 function playDoorSound(isOpening) {
   const s = isOpening ? doorOpenSound : doorCloseSound
+
+  // On remet au début pour que le son rejoue entièrement
   s.currentTime = 0
-  s.play().catch(() => {
-    // si le navigateur bloque la lecture auto, on ignore
+
+  s.play().catch((err) => {
+    // Certains navigateurs bloquent si l'utilisateur n'a pas encore interagi
+    console.warn("Lecture audio bloquée :", err)
   })
 }
+
 
 // =====================
 // GÉOMÉTRIE
@@ -320,6 +329,18 @@ function strokePathProgressive(path, t) {
   ctx.stroke()
 }
 
+function computeCirclePath(cx, cy, r, segments = 40) {
+  const path = []
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2
+    const x = cx + Math.cos(angle) * r
+    const y = cy + Math.sin(angle) * r
+    path.push({ x, y })
+  }
+  return path
+}
+
+
 
 function drawDoor(geom) {
   const { doorWidth, doorHeight, doorLeftX, doorCenterY } = geom
@@ -355,29 +376,20 @@ function drawDoor(geom) {
   const tDoor = Math.min(introProgress / 0.8, 1)
   strokePathProgressive(doorPath, tDoor)
 
-  // Poignée
-// Poignée dessinée en tracé progressif
-if (introProgress > 0.6) {
-  // Progression locale de la poignée (0 → 1 entre 0.6 et 1.0)
+   // Poignée (cercle en tracé progressif)
   const handleProgress = Math.min(introProgress / 0.8, 1)
 
+  const handleRadius = doorWidth * 0.05
+  const handleCenterX = doorWidth * 0.8     // vers la droite
+  const handleCenterY = 0                   // milieu vertical
 
-  const handleWidth = 16
-  const handleHeight = doorHeight * 0.35
-  const handleX = doorWidth + perspectiveOffset - handleWidth - 30
-  const handleY = -handleHeight / 2
-
-  // On crée un path rectangle simple (tu peux complexifier ensuite)
-  const handlePath = [
-    { x: handleX,                 y: handleY },
-    { x: handleX + handleWidth,   y: handleY },
-    { x: handleX + handleWidth,   y: handleY + handleHeight },
-    { x: handleX,                 y: handleY + handleHeight }
-  ]
+  const handlePath = computeCirclePath(handleCenterX, handleCenterY, handleRadius)
 
   ctx.globalAlpha = doorOpacity
   strokePathProgressive(handlePath, handleProgress)
-}
+
+
+
 
 
   ctx.restore()

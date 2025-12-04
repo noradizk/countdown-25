@@ -21,8 +21,8 @@ let hasFinishCalled = false;
 // ---------------------------
 
 // Durée en secondes (tweak comme tu veux)
-const INTRO_DURATION = 1.5;       // temps pour que les knobs entrent dans la view
-const OUTRO_DURATION = 1.5;       // temps pour qu'ils sortent de la view
+const INTRO_DURATION = 3;       // temps pour que les knobs entrent dans la view
+const OUTRO_DURATION = 3;       // temps pour qu'ils sortent de la view
 const POST_SOLVE_DELAY = 0.8;     // délai après la résolution avant de lancer l'outro
 
 let introProgress = 0;            // 0 → en bas, 1 → en place
@@ -466,6 +466,22 @@ function update(dt) {
   let offsetX = 0;
   let offsetY = 0;
 
+
+  // Intro : les knobs viennent du haut et descendent
+if (!isIntroDone) {
+  const t = introProgress; // 0 → 1
+  const startOffsetY = h * 0.9;  // distance depuis le haut
+  const eased = t * t * (3 - 2 * t); // easeInOut simple
+  offsetY = -(1 - eased) * startOffsetY; // descend depuis le haut jusqu'à 0
+}
+// Outro : les knobs descendent vers le bas
+else if (isOutroPlaying) {
+  const t = outroProgress; // 0 → 1
+  const endOffsetY = h * 1; // distance vers le bas
+  const eased = t * t;        // easeIn
+  offsetY = eased * endOffsetY; // 0 → +endOffsetY (vers le bas)
+}
+/*
   // Intro : les knobs viennent du bas
   if (!isIntroDone) {
     const t = introProgress; // 0 → 1
@@ -478,9 +494,9 @@ function update(dt) {
     const t = outroProgress; // 0 → 1
     const endOffsetY = h * 1; // distance vers le haut
     const eased = t * t;        // easeIn
-    offsetY = -eased * endOffsetY; // 0 → -endOffsetY
+    offsetY = eased * endOffsetY; // 0 → -endOffsetY
   }
-
+*/
   // ---------------------------
   //   DESSIN
   // ---------------------------

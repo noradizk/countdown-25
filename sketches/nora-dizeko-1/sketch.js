@@ -6,6 +6,8 @@ const { ctx, canvas } = renderer
 
 run(update)
 
+
+
 // ==========================
 //  CONFIG GLOBALE
 // ==========================
@@ -110,6 +112,42 @@ function assignRandomValues() {
 
 function getWinningCard() {
   return cards.find(c => c.value === WIN_VALUE) || null
+}
+
+// ==========================
+//  INIT / RESET DU JEU
+// ==========================
+let gameInitialized = false
+let frameCount = 0
+
+function resetGame() {
+  // Reset des variables globales
+  winningCard = null
+  winAnimTime = 0
+  winAnimationDone = false
+  totalAttempts = 0
+  canClick = false
+  selectedCards = []
+  
+  // Réinitialisation des cartes
+  cards.forEach(card => {
+    card.x = card.baseX
+    card.y = -cardHeight
+    card.targetX = card.baseX
+    card.targetY = -cardHeight
+    card.extraAngle = 0
+    card.spring.position = 0
+    card.spring.target = 0
+  })
+  
+  assignRandomValues()
+}
+
+function startIntroDelayed() {
+  // On attend quelques frames avant de déclencher l'animation
+  setTimeout(() => {
+    startIntro()
+  }, 50)
 }
 
 // ==========================
@@ -225,26 +263,24 @@ function drawBentCard(bendAmount, side, value) {
 
   ctx.closePath()
 
-  let grad
-  if (side === "front") {
-    grad = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2)
-    grad.addColorStop(0, "#808080ff")
-    grad.addColorStop(1, "#808080ff")
-  } else {
-    grad = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2)
-    grad.addColorStop(0, "#cdcdcdff")
-    grad.addColorStop(1, "#cdcdcdff")
-  }
+ let fillColor
 
-  ctx.fillStyle = grad
-  ctx.fill()
-  ctx.lineWidth = 2
-  ctx.strokeStyle = "white"
-  ctx.stroke()
+if (side === "front") {
+  fillColor = "#ffffffff"   // face avant : gris clair uniforme
+} else {
+  fillColor = "#ffffffff"   // face arrière : gris uniforme
+}
+
+ctx.fillStyle = fillColor
+ctx.fill()
+
+ctx.lineWidth = 2
+ctx.strokeStyle = "white"
+ctx.stroke()
 
   if (side === "front") {
-    ctx.fillStyle = "white"
-    ctx.font = "bold 120px system-ui"
+    ctx.fillStyle = "black"
+    ctx.font = "bold 250px system-ui"
     ctx.textAlign = "center"
     ctx.textBaseline = "middle"
 
