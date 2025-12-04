@@ -30,6 +30,25 @@ const WIN_VALUE = 1             // valeur gagnante
 const shuffleLerp = 0.18        // vitesse de lerp vers targetX/Y
 
 // ==========================
+//  AUDIO
+// ==========================
+const flipSound = new Audio("audio/card.mp3") // ⇦ adapte le chemin si besoin
+flipSound.volume = 0.6 // optionnel, ajuste le volume (0.0 à 1.0)
+
+function playFlipSound() {
+  try {
+    // reset pour pouvoir rejouer même si le son n’est pas fini
+    flipSound.currentTime = 0
+    flipSound.play()
+  } catch (e) {
+    // éviter les erreurs silencieuses liées aux policies navigateur
+    // console.warn("Impossible de jouer le son :", e)
+  }
+}
+
+
+
+// ==========================
 //  INTRO
 // ==========================
 const INTRO_DROP_DELAY = 250      // ms entre chaque carte qui commence à tomber
@@ -476,6 +495,9 @@ function handleLose(lostCards) {
 function handleCardClick(card) {
   if (!canClick) return
   if (selectedCards.includes(card)) return  // pas 2x la même
+
+    // 🔊 son de flip
+    playFlipSound()
 
   // On flip la carte cliquée
   card.spring.target = 1
