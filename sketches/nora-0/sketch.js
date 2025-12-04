@@ -10,12 +10,8 @@ run(update)
 // =====================
 
 let introProgress = 0        // 0 → pas visible, 1 → intro finie
-const introDuration = 1.8    // en secondes (plus lent que avant)
+const introDuration = 1.2    // en secondes
 let introComplete = false
-
-// petit délai avant que l'intro commence vraiment
-const INTRO_DELAY = 0.6 // secondes
-let introDelayElapsed = 0
 
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3)
@@ -23,13 +19,6 @@ function easeOutCubic(t) {
 
 function updateIntro(dt) {
   if (introComplete) return
-
-  // attendre un peu avant de déclencher l'animation d'intro
-  if (introDelayElapsed < INTRO_DELAY) {
-    introDelayElapsed += dt
-    if (introDelayElapsed < INTRO_DELAY) return
-    // on continue ensuite vers l'animation d'intro
-  }
 
   introProgress += dt / introDuration
   if (introProgress >= 1) {
@@ -65,40 +54,59 @@ const gravityConstant = 2000 // augmente pour un mouvement plus rapide
 // facteur pour booster ou calmer l'effet du lancer
 const DRAG_VELOCITY_SCALE = 0.9 // essaie 0.5 / 1 / 1.5
 
+
 // =====================
-// OUTRO / PAUSE / FADE
+// TIME / OUTRO
 // =====================
 
-// outro (rétractation)
-let isOutroPlaying = false
-let outroProgress = 0       // 0 → not started, 1 → finished
-const OUTRO_DURATION = 1.2  // durée de la rétractation
+// angle “repos” (vers le bas)
+const REST_ANGLE = Math.PI / 2
 
-// pause sur le zéro (sans pendule)
-let isPauseOnZero = false
-let pauseTimer = 0
-const PAUSE_ON_ZERO = 1.2 // secondes
+// temps global
+let globalTime = 0
+let lastInteractionTime = 0
 
-// fade to black
-let isFading = false
+// inactivité après 0 complet avant de lancer l’outro
+const IDLE_BEFORE_OUTRO = 1.0 // en secondes
+
+// détection du tour complet
+let zeroComplete = false
+let lastLoopAngle = REST_ANGLE
+let accumulatedRotation = 0
+const TWO_PI = Math.PI * 2
+const LOOP_THRESHOLD = TWO_PI * 0.9  // ~360° mais un peu de marge
+
+// OUTRO machine à états
+// "none" → "return" → "shrink" → "hold" → "fade"
+let outroState = "none"
+let outroTime = 0
+
+const OUTRO_RETURN_DURATION = 0.5   // pendule revient vers le bas (chemin le plus court)
+const OUTRO_SHRINK_DURATION = 0.3   // pendule remonte le long du fil et disparaît
+const OUTRO_HOLD_DURATION   = 3.0   // pause sur le zéro
+const FADE_DURATION         = 0.7   // fondu au noir
+
 let fadeProgress = 0
-const FADE_DURATION = 0.8 // secondes
+let hasFinished = false
 
-// helper pour démarrer l'outro (on l'expose aussi à la touche 'f')
-function startOutro() {
-  if (isOutroPlaying || isPauseOnZero || isFading) return
-  // si on est en plein drag → forcer la fin du drag proprement
-  if (isDragging) endDrag()
-  isOutroPlaying = true
-  outroProgress = 0
-}
+// pour l’outro : on garde l’angle de départ
+let outroStartAngle = REST_ANGLE
+
+// échelle de longueur du pendule (1 = normal, 0 = raccourci à 0)
+// on l’utilise pour l’outro shrink, mais 1 en temps normal
+let lengthScale = 1
+
+// masque du zéro figé une fois le 0 complété
+let zeroMaskInnerX = null
+let zeroMaskInnerY = null
+
 
 // =====================
 // ÉTAT PENDULE
 // =====================
 
 // angle (radians) – départ vers le bas
-let angle = Math.PI / 2
+let angle = REST_ANGLE
 let angularVelocity = 0
 let isDragging = false
 
@@ -110,6 +118,7 @@ let dragAngularVelocity = 0
 // trace : {x,y} ou null pour couper entre deux phases de dessin
 /** @type ({x:number, y:number} | null)[] */
 const trailPoints = []
+
 
 // =====================
 // COORDONNÉES
@@ -126,6 +135,7 @@ function getCanvasCoordinates(event) {
   return { x, y }
 }
 
+
 // =====================
 // GÉOMÉTRIE PENDULE
 // (physique en angle, position déformée en ellipse)
@@ -141,16 +151,11 @@ function getPendulumGeometry() {
   const baseLength = h * pendulumLengthFactor
   const baseBobRadius = h * bobSizeFactor
 
-  // scale d’intro : 0 → 1 (on respecte le delay)
-  const sIntro = (introDelayElapsed < INTRO_DELAY) ? 0 : (introComplete ? 1 : easeOutCubic(introProgress))
+  // scale d’intro : 0 → 1
+  const s = introComplete ? 1 : easeOutCubic(introProgress)
 
-  // during outro we shrink the pendulum (rétractation)
-  const outroEase = isOutroPlaying ? easeOutCubic(Math.min(Math.max(outroProgress, 0), 1)) : 0
-  const outroScale = isOutroPlaying ? (1 - outroEase) : 1
-
-  const s = sIntro * outroScale
-
-  const length = baseLength * s
+  // en temps normal lengthScale = 1 ; pendant l’outro shrink, 1 → 0
+  const length = baseLength * s * lengthScale
   const bobRadius = baseBobRadius * s
 
   // position "circulaire" brute
@@ -172,15 +177,51 @@ function getPendulumGeometry() {
   }
 }
 
+
+// =====================
+// DÉTECTION DU TOUR COMPLET (360°) + lock du masque du zéro
+// =====================
+
+function updateLoopDetection(geom) {
+  if (!introComplete) return
+  if (zeroComplete) return
+
+  let delta = angle - lastLoopAngle
+
+  // on corrige pour toujours prendre le chemin le plus court
+  if (delta > Math.PI)  delta -= TWO_PI
+  if (delta < -Math.PI) delta += TWO_PI
+
+  accumulatedRotation += delta
+  lastLoopAngle = angle
+
+  // condition : tour complet + pendule revenu vers le bas
+  const ANGLE_MARGIN = 0.3 // ~17°
+  if (
+    Math.abs(accumulatedRotation) >= LOOP_THRESHOLD &&
+    Math.abs(angle - REST_ANGLE) < ANGLE_MARGIN
+  ) {
+    zeroComplete = true
+    lastInteractionTime = globalTime
+
+    // on fige la taille du masque du zéro à ce moment-là
+    const { length, bobRadius } = geom
+    const outerX = length * ellipseScaleX
+    const outerY = length * ellipseScaleY
+    const thickness = bobRadius * 2.2
+    zeroMaskInnerX = Math.max(0, outerX - thickness)
+    zeroMaskInnerY = Math.max(0, outerY - thickness)
+  }
+}
+
+
 // =====================
 // INTERACTION : DRAG
 // =====================
 
-// block input during outro/pause/fade
 canvas.addEventListener("pointerdown", (event) => {
-  // si on est en outro / pause / fade => pas d'input
   if (!introComplete) return   // on ignore les clics pendant l’intro
-  if (isOutroPlaying || isPauseOnZero || isFading) return
+  if (outroState !== "none") return // plus d’inputs pendant l’outro
 
   const { x, y } = getCanvasCoordinates(event)
   const { bobX, bobY, bobRadius } = getPendulumGeometry()
@@ -197,13 +238,15 @@ canvas.addEventListener("pointerdown", (event) => {
     lastDragAngle = angle
     lastDragTime = performance.now() / 1000 // en secondes
     dragAngularVelocity = 0
+
+    // interaction utilisateur → reset du timer d’inactivité
+    lastInteractionTime = globalTime
   }
 })
 
 canvas.addEventListener("pointermove", (event) => {
   if (!isDragging) return
-  if (isOutroPlaying || isPauseOnZero || isFading) {
-    // safety: if somehow dragging during these states, cancel
+  if (outroState !== "none") {
     endDrag()
     return
   }
@@ -228,8 +271,8 @@ canvas.addEventListener("pointermove", (event) => {
       let delta = newAngle - lastDragAngle
 
       // normalisation pour éviter le saut à ±π
-      if (delta > Math.PI) delta -= 2 * Math.PI
-      if (delta < -Math.PI) delta += 2 * Math.PI
+      if (delta > Math.PI) delta -= TWO_PI
+      if (delta < -Math.PI) delta += TWO_PI
 
       dragAngularVelocity = delta / dt
     }
@@ -238,6 +281,9 @@ canvas.addEventListener("pointermove", (event) => {
   angle = newAngle
   lastDragAngle = newAngle
   lastDragTime = now
+
+  // interaction en cours → reset du timer d’inactivité
+  lastInteractionTime = globalTime
 })
 
 function endDrag() {
@@ -254,15 +300,14 @@ function endDrag() {
   lastDragAngle = null
   lastDragTime = null
   dragAngularVelocity = 0
+
+  // interaction → reset du timer d’inactivité
+  lastInteractionTime = globalTime
 }
 
 canvas.addEventListener("pointerup", endDrag)
 canvas.addEventListener("pointerleave", endDrag)
 
-// raccourci clavier pour tester : 'f' déclenche l'outro
-window.addEventListener("keydown", (e) => {
-  if (e.key === "f") startOutro()
-})
 
 // =====================
 // PHYSIQUE DU PENDULE
@@ -270,8 +315,8 @@ window.addEventListener("keydown", (e) => {
 
 function updatePendulumPhysics(dt, geom) {
   if (!introComplete) return    // pas de physique pendant l’intro
+  if (outroState !== "none") return // on ne fait plus de physique pendant l’outro
   if (isDragging) return        // pas de physique pendant le drag
-  if (isOutroPlaying && outroProgress >= 1) return // lock physics during outro end phase
 
   const { length } = geom
 
@@ -284,27 +329,24 @@ function updatePendulumPhysics(dt, geom) {
   // intégration
   angularVelocity += angularAcceleration * dt
 
-  // --- clamp de la vitesse angulaire pour éviter les valeurs folles ---
-  // choisis une valeur adaptée au feeling (ex : 4 rad/s = assez vif)
+  // clamp de la vitesse angulaire pour éviter les valeurs folles
   const MAX_ANGULAR_SPEED = 4.0
   if (angularVelocity > MAX_ANGULAR_SPEED) angularVelocity = MAX_ANGULAR_SPEED
   if (angularVelocity < -MAX_ANGULAR_SPEED) angularVelocity = -MAX_ANGULAR_SPEED
-  // --------------------------------------------------------------------
 
   angularVelocity *= damping
   angle += angularVelocity * dt
 }
+
 
 // =====================
 // TRACE (après relâche, sur la même trajectoire que le pendule)
 // =====================
 
 function updateTrail(geom) {
-  // during intro delay or intro animation we don't record trail
-  if (introDelayElapsed < INTRO_DELAY) return
   if (!introComplete) return
   if (isDragging) return
-  if (isOutroPlaying) return // keep trail fixed during outro
+  if (outroState !== "none") return // on fige le zéro pendant l’outro
 
   const { bobX, bobY, bobRadius } = geom
 
@@ -336,6 +378,85 @@ function updateTrail(geom) {
     trailPoints.splice(0, trailPoints.length - maxPoints)
   }
 }
+
+
+// =====================
+// OUTRO : logique d’animation
+// =====================
+
+function updateOutro(dt) {
+  if (!zeroComplete) return
+  if (hasFinished) return
+
+  // si on n’a pas encore commencé l’outro → on surveille l’inactivité
+  if (outroState === "none") {
+    if (!isDragging && (globalTime - lastInteractionTime >= IDLE_BEFORE_OUTRO)) {
+      outroState = "return"
+      outroTime = 0
+      outroStartAngle = angle
+      lengthScale = 1 // on s’assure que la longueur est normale au début
+    }
+    return
+  }
+
+  // une fois qu’on est en outro, on avance le temps local
+  outroTime += dt
+
+  if (outroState === "return") {
+    // pendule revient vers l’angle REST_ANGLE par le chemin le plus court (0.5s)
+    const t = Math.min(outroTime / OUTRO_RETURN_DURATION, 1)
+    const eased = easeOutCubic(t)
+
+    // diff angulaire chemin le plus court
+    let diff = REST_ANGLE - outroStartAngle
+    if (diff > Math.PI) diff -= TWO_PI
+    if (diff < -Math.PI) diff += TWO_PI
+
+    angle = outroStartAngle + diff * eased
+    lengthScale = 1 // longueur normale
+
+    if (t >= 1) {
+      // on est revenu au bas
+      angle = REST_ANGLE
+      outroState = "shrink"
+      outroTime = 0
+    }
+  } else if (outroState === "shrink") {
+    // le pendule remonte le long du fil et disparaît (0.3s)
+    const t = Math.min(outroTime / OUTRO_SHRINK_DURATION, 1)
+    const eased = easeOutCubic(t)
+
+    // on réduit uniquement la longueur du pendule, l’angle reste vers le bas
+    angle = REST_ANGLE
+    lengthScale = 1 - eased // 1 → 0
+
+    if (t >= 1) {
+      lengthScale = 0
+      outroState = "hold"
+      outroTime = 0
+    }
+  } else if (outroState === "hold") {
+    // pause sur le zéro seul (3s)
+    angle = REST_ANGLE
+    lengthScale = 0 // pendule totalement raccourci, on pourra choisir de ne plus l’afficher
+
+    if (outroTime >= OUTRO_HOLD_DURATION) {
+      outroState = "fade"
+      outroTime = 0
+      fadeProgress = 0
+    }
+  } else if (outroState === "fade") {
+    // fondu au noir (0.7s) puis finish
+    const t = Math.min(outroTime / FADE_DURATION, 1)
+    fadeProgress = t
+
+    if (t >= 1 && !hasFinished) {
+      hasFinished = true
+      finish()
+    }
+  }
+}
+
 
 // =====================
 // DESSIN
@@ -381,15 +502,20 @@ function drawTrail(geom) {
 function drawInnerMask(geom) {
   const { pivotX, pivotY, length, bobRadius } = geom
 
-  // ellipse extérieure du 0 (en utilisant le même scaling que la trajectoire)
-  const outerX = length * ellipseScaleX
-  const outerY = length * ellipseScaleY
+  // si on a figé le masque au moment où le zéro a été complété
+  let innerX, innerY
 
-  // épaisseur de l'anneau → on enlève cette épaisseur pour obtenir le rayon intérieur
-  const thickness = bobRadius * 2.2 // à tweaker pour l'épaisseur du zéro
-
-  const innerX = Math.max(0, outerX - thickness)
-  const innerY = Math.max(0, outerY - thickness)
+  if (zeroMaskInnerX != null && zeroMaskInnerY != null) {
+    innerX = zeroMaskInnerX
+    innerY = zeroMaskInnerY
+  } else {
+    // version dynamique avant que le zéro soit complet
+    const outerX = length * ellipseScaleX
+    const outerY = length * ellipseScaleY
+    const thickness = bobRadius * 2.2
+    innerX = Math.max(0, outerX - thickness)
+    innerY = Math.max(0, outerY - thickness)
+  }
 
   ctx.fillStyle = "black"
   ctx.beginPath()
@@ -399,6 +525,11 @@ function drawInnerMask(geom) {
 
 function drawPendulum(geom) {
   const { pivotX, pivotY, bobX, bobY, bobRadius } = geom
+
+  // si lengthScale = 0 (pendule complètement raccourci), on peut choisir de ne plus le dessiner
+  if (lengthScale <= 0) {
+    return
+  }
 
   // fil
   ctx.strokeStyle = "white"
@@ -419,23 +550,10 @@ function drawPendulum(geom) {
   ctx.stroke()
 }
 
-// draw the typographic 0 (Helvetica) centered on pivot (used during pause)
-function drawTypoZero(geom, alpha = 1) {
-  const { pivotX, pivotY } = geom
-  ctx.save()
-  ctx.globalAlpha = alpha
-  ctx.fillStyle = "white"
-  // size relative to canvas height; tweak as needed
-  ctx.font = `bold ${Math.floor(canvas.height * 0.45)}px Helvetica, Arial, sans-serif`
-  ctx.textAlign = "center"
-  ctx.textBaseline = "middle"
-  ctx.fillText("0", pivotX, pivotY)
-  ctx.restore()
-}
+// overlay de fade
+function drawFadeOverlay() {
+  if (fadeProgress <= 0) return
 
-// overlay fade to black
-function drawFade() {
-  if (!isFading && fadeProgress <= 0) return
   ctx.save()
   ctx.globalAlpha = Math.min(Math.max(fadeProgress, 0), 1)
   ctx.fillStyle = "black"
@@ -443,78 +561,39 @@ function drawFade() {
   ctx.restore()
 }
 
+
 // =====================
 // BOUCLE PRINCIPALE
 // =====================
 
 function update(dt) {
   dt = Math.min(dt, 1 / 30)
+  if (hasFinished) return
 
-  // 1) intro (delay + animation)
+  globalTime += dt
+
+  // 1) mettre à jour l’intro
   updateIntro(dt)
 
-  // 2) physique (si autorisé)
   const geomBefore = getPendulumGeometry()
   updatePendulumPhysics(dt, geomBefore)
 
-  // 3) trail update (si autorisé)
+  // 2) détection du tour complet (uniquement avant l’outro)
+  updateLoopDetection(geomBefore)
+
+  // 3) logique d’outro (après zéro complet)
+  updateOutro(dt)
+
   const geom = getPendulumGeometry()
   updateTrail(geom)
 
-  // 4) outro progression
-  if (isOutroPlaying && !isPauseOnZero) {
-    outroProgress += dt / OUTRO_DURATION
-    if (outroProgress >= 1) {
-      outroProgress = 1
-      // start pause on zero
-      isPauseOnZero = true
-      pauseTimer = 0
-    }
-  }
+  // =====================
+  // RENDER
+  // =====================
 
-  // 5) pause logic
-  if (isPauseOnZero && !isFading) {
-    pauseTimer += dt
-    // during pause we hide the pendulum (draw only trail + inner mask + typo)
-    if (pauseTimer >= PAUSE_ON_ZERO) {
-      // start fading
-      isFading = true
-      fadeProgress = 0
-    }
-  }
-
-  // 6) fade logic
-  if (isFading) {
-    fadeProgress += dt / FADE_DURATION
-    if (fadeProgress >= 1) {
-      fadeProgress = 1
-      // fin de l'animation -> appeler finish()
-      finish()
-      return
-    }
-  }
-
-  // ---------------------------
-  //   RENDER
-  // ---------------------------
   drawBackground(geom.w, geom.h)
-
-  // draw trail + inner mask (always visible when present)
-  drawTrail(geom)
-  drawInnerMask(geom)
-
-  // draw pendulum only if not in the pause-on-zero stage (we also hide during fade/outro end)
-  if (!isPauseOnZero && !isFading) {
-    drawPendulum(geom)
-  }
-
-  // If in pause show typographic zero cleanly on top
-  if (isPauseOnZero) {
-    // optional: fade-in the typographic zero (use pauseTimer to modulate alpha)
-    const alpha = Math.min(1, Math.max(0, (pauseTimer / 0.2))) // quick fade-in
-    drawTypoZero(geom, alpha)
-  }
-
-  // overlay fade (draw last)
-  if (isFading) drawFade()
+  drawTrail(geom)       // trace = zéro
+  drawInnerMask(geom)   // masque au centre du zéro
+  drawPendulum(geom)    // pendule par-dessus (ou pas, selon l’outro)
+  drawFadeOverlay()     // fondu si on est en phase fade
 }

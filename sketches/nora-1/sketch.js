@@ -37,24 +37,20 @@ flipSound.volume = 0.6 // optionnel, ajuste le volume (0.0 à 1.0)
 
 function playFlipSound() {
   try {
-    // reset pour pouvoir rejouer même si le son n’est pas fini
     flipSound.currentTime = 0
     flipSound.play()
   } catch (e) {
-    // éviter les erreurs silencieuses liées aux policies navigateur
-    // console.warn("Impossible de jouer le son :", e)
+    // policies navigateur, on ignore l'erreur
   }
 }
-
-
 
 // ==========================
 //  INTRO
 // ==========================
 const INTRO_DROP_DELAY = 250      // ms entre chaque carte qui commence à tomber
 const INTRO_CARD_DROP_TIME = 700  // ms pour qu'une carte ait le temps d'atteindre sa place
-const INTRO_REVEAL_DELAY = 300    // ms après la fin des drops avant de retourner la carte 1
-const INTRO_FACE_TIME = 900       // ms pendant lesquels la carte 1 reste face visible
+const INTRO_REVEAL_DELAY = 300    // ms après la fin des drops avant de retourner la carte gagnante
+const INTRO_FACE_TIME = 900       // ms pendant lesquels la carte gagnante reste face visible
 let introstarted = false
 
 // ==========================
@@ -115,6 +111,33 @@ function initCards() {
 initCards()
 
 // ==========================
+//  RANDOMISATION DES SLOTS
+// ==========================
+//
+// On garde les mêmes positions horizontales (slots),
+// mais on les assigne aux cartes dans un ordre aléatoire.
+//
+function randomizeRowLayout() {
+  // 1) on construit la liste des slots X possibles
+  const xs = []
+  for (let i = 0; i < NB_CARDS; i++) {
+    xs.push(startX + i * spacing)
+  }
+
+  // 2) on shuffle les slots
+  for (let i = xs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[xs[i], xs[j]] = [xs[j], xs[i]]
+  }
+
+  // 3) on assigne ces slots aux cartes
+  cards.forEach((card, index) => {
+    card.baseX = xs[index]
+    card.targetX = card.baseX
+  })
+}
+
+// ==========================
 //  ASSIGNATION DES VALEURS
 // ==========================
 function assignRandomValues() {
@@ -156,6 +179,9 @@ function resetGame() {
   outroStarted = false
   outroDone = false
   
+  // on remet une nouvelle disposition de rangée
+  randomizeRowLayout()
+
   // Réinitialisation des cartes
   cards.forEach(card => {
     card.x = card.baseX
@@ -171,7 +197,6 @@ function resetGame() {
 }
 
 function startIntroDelayed() {
-  // On attend quelques frames avant de déclencher l'animation
   setTimeout(() => {
     startIntro()
   }, 2000)
@@ -182,6 +207,9 @@ function startIntroDelayed() {
 // ==========================
 function startIntro() {
   canClick = false
+
+  // 👉 on randomise déjà la disposition de la rangée pour l’intro
+  randomizeRowLayout()
 
   // 1) cartes au-dessus de l'écran
   cards.forEach((card) => {
@@ -258,37 +286,25 @@ function drawBentCard(bendAmount, side, value) {
   top    -= bend
   bottom += bend
 
-  // 🔹 rayon des coins (ajuste ici pour arrondir plus ou moins)
-  const radius = 60 // essaie 40 / 80 / 100 pour voir
+  const radius = 60
 
   ctx.beginPath()
-  // on commence en haut-gauche, décalé du rayon
   ctx.moveTo(left + radius, top)
-
-  // bord haut
   ctx.lineTo(right - radius, top)
   ctx.quadraticCurveTo(right, top, right, top + radius)
-
-  // bord droit
   ctx.lineTo(right, bottom - radius)
   ctx.quadraticCurveTo(right, bottom, right - radius, bottom)
-
-  // bord bas
   ctx.lineTo(left + radius, bottom)
   ctx.quadraticCurveTo(left, bottom, left, bottom - radius)
-
-  // bord gauche
   ctx.lineTo(left, top + radius)
   ctx.quadraticCurveTo(left, top, left + radius, top)
-
   ctx.closePath()
 
-  // couleur de fond
   let fillColor
   if (side === "front") {
-    fillColor = "#ffffffff"   // face avant
+    fillColor = "#ffffffff"
   } else {
-    fillColor = "#ffffffff"   // face arrière
+    fillColor = "#ffffffff"
   }
 
   ctx.fillStyle = fillColor
@@ -299,17 +315,14 @@ function drawBentCard(bendAmount, side, value) {
   ctx.stroke()
 
   if (side === "front") {
-    // chiffre au centre
     ctx.fillStyle = "black"
     ctx.font = "bold 250px system-ui"
     ctx.textAlign = "center"
     ctx.textBaseline = "middle"
 
-    // ton flip utilise scale(-1,1) ailleurs, on garde
     ctx.scale(-1, 1)
     ctx.fillText(value != null ? value : "?", 0, 0)
   } else {
-    // cadre intérieur (avec coins arrondis aussi, optionnel)
     const pad = 60
     const innerLeft   = -w / 2 + pad
     const innerRight  =  w / 2 - pad
@@ -334,7 +347,6 @@ function drawBentCard(bendAmount, side, value) {
   }
 }
 
-
 // ==========================
 //  SHUFFLE
 // ==========================
@@ -348,7 +360,7 @@ function stackCards(centerX, centerY) {
 
 function fanOutCards(centerX, centerY) {
   cards.forEach((card, i) => {
-    const offsetIndex = i - (NB_CARDS - 1) / 2   // ex: 0→-1.5, 1→-0.5, 2→0.5, 3→1.5
+    const offsetIndex = i - (NB_CARDS - 1) / 2
     card.targetX = centerX + offsetIndex * cardWidth * 0.5
     card.targetY = centerY - 140
     card.extraAngle = offsetIndex * 0.15
@@ -365,6 +377,9 @@ function chaosCenter(centerX, centerY) {
 }
 
 function resetToRow() {
+  // 👉 on randomise la disposition finale de la rangée
+  randomizeRowLayout()
+
   cards.forEach(card => {
     card.targetX = card.baseX
     card.targetY = card.baseY
@@ -417,24 +432,20 @@ function shuffleIntroRound() {
 //  LOGIQUE DU CLIC
 // ==========================
 function enforceFirstRoundLose() {
-  if (totalAttempts !== 0) return  // seulement pour la toute première manche
+  if (totalAttempts !== 0) return
 
   const hasWinInPair = selectedCards.some(c => c.value === WIN_VALUE)
   if (!hasWinInPair) return
 
-  // On prend la carte gagnante dans la paire...
   const winCardInPair = selectedCards.find(c => c.value === WIN_VALUE)
-  // ...et une carte non gagnante en dehors de la paire
   const other = cards.find(c => !selectedCards.includes(c) && c.value !== WIN_VALUE)
 
   if (!winCardInPair || !other) return
 
-  // On échange leurs valeurs -> la paire ne contient plus la carte gagnante
   const tmp = winCardInPair.value
   winCardInPair.value = other.value
   other.value = tmp
 }
-
 
 function handleWin(card) {
   canClick = false
@@ -463,16 +474,14 @@ function handleWin(card) {
 }
 
 function handleLose(lostCards) {
-  const dropTargetY = canvas.height + cardHeight // en-dessous de l'écran
+  const dropTargetY = canvas.height + cardHeight
 
-  // Étape 1 : toutes les cartes perdues tombent
   lostCards.forEach((card) => {
     card.targetX = card.x
     card.targetY = dropTargetY
   })
 
   setTimeout(() => {
-    // Étape 2 : respawn au-dessus, puis redescente à leur base
     lostCards.forEach((card) => {
       card.x = card.baseX
       card.y = -cardHeight
@@ -484,7 +493,6 @@ function handleLose(lostCards) {
       card.spring.target = 0
     })
 
-    // Étape 3 : une fois qu'elles ont eu le temps de redescendre, on shuffle
     setTimeout(() => {
       shuffleLostRound()
     }, NEW_CARD_IN_TIME + DELAY_BEFORE_SHUFFLE)
@@ -494,22 +502,17 @@ function handleLose(lostCards) {
 
 function handleCardClick(card) {
   if (!canClick) return
-  if (selectedCards.includes(card)) return  // pas 2x la même
+  if (selectedCards.includes(card)) return
 
-    // 🔊 son de flip
-    playFlipSound()
+  playFlipSound()
 
-  // On flip la carte cliquée
   card.spring.target = 1
   selectedCards.push(card)
 
-  // Si c'est la 1ère carte de la paire → on attend la 2e
   if (selectedCards.length < 2) {
     return
   }
 
-  // On a maintenant UNE PAIRE → on résout le tour
-  // On force la première manche à être perdante si besoin
   if (totalAttempts === 0) {
     enforceFirstRoundLose()
   }
@@ -518,22 +521,19 @@ function handleCardClick(card) {
   totalAttempts++
 
   const isWin = selectedCards.some(c => c.value === WIN_VALUE)
-  const pair = [...selectedCards]   // copie, pour l'utiliser dans le setTimeout
+  const pair = [...selectedCards]
 
   setTimeout(() => {
     if (isWin) {
-      // On récupère la carte gagnante dans la paire
       const winCard = pair.find(c => c.value === WIN_VALUE) || pair[0]
       handleWin(winCard)
     } else {
-      // Les deux cartes retournées sont perdues et doivent tomber
       handleLose(pair)
     }
 
     selectedCards = []
   }, 900)
 }
-
 
 // ==========================
 //  INPUT SOURIS
@@ -618,7 +618,6 @@ function update(dt) {
     introstarted = true
   }
 
-  // anim de victoire (zoom carte gagnante)
   if (winningCard && !winAnimationDone) {
     winAnimTime += dt
     if (winAnimTime >= WIN_GROW_DURATION) {
@@ -627,19 +626,15 @@ function update(dt) {
     }
   }
 
-  // Après la fin du zoom de victoire → attente puis drop de la carte gagnante
   if (winningCard && winAnimationDone && !outroStarted) {
     outroDelayTimer += dt
     if (outroDelayTimer >= OUTRO_DELAY_AFTER_WIN) {
       outroStarted = true
-      // on fait tomber la carte gagnante en dessous de l'écran
       winningCard.targetY = canvas.height + cardHeight * 3
     }
   }
 
-  // Quand la carte gagnante est complètement sortie de l'écran → finish()
   if (outroStarted && !outroDone && winningCard) {
-    // on considère la carte "hors de l'écran" quand son bord supérieur est sous le bas du canvas
     if (winningCard.y - cardHeight / 2 > canvas.height) {
       outroDone = true
       finish()
