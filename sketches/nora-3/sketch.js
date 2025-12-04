@@ -11,7 +11,7 @@ run(update)
 let introProgress = 0
 let introComplete = false
 
-let openProgress = 0
+let openProgress = 0          // 0 = fermé, 1 = ouvert
 let isOpen = false
 let isDragging = false
 let dragStartX = 0
@@ -33,11 +33,13 @@ let blackRectProgress = 0
 // =====================
 // SONS PORTE
 // =====================
+const doorOpen = await audio.load("audio/ouverte.mp3")
+const doorClose = await audio.load("audio/ferme.mp3")
 
-const doorOpen = await audio.load("audio/ouverte.mp3");
-
-
-
+// pour la logique des sons
+let lastOpenProgress = 0
+let hasPlayedOpenSoundThisDrag = false
+let closingSoundPending = false   // on doit jouer le son de fermeture quand l’auto-close finit
 
 // =====================
 // GÉOMÉTRIE
@@ -110,6 +112,11 @@ canvas.addEventListener("pointerdown", (event) => {
   isDragging = true
   dragStartX = x
   dragStartProgress = openProgress
+
+  // reset pour ce drag
+  hasPlayedOpenSoundThisDrag = false
+  closingSoundPending = false
+  lastOpenProgress = openProgress
 })
 
 canvas.addEventListener("pointermove", (event) => {
@@ -125,6 +132,21 @@ canvas.addEventListener("pointermove", (event) => {
   openProgress = dragStartProgress + deltaProgress
   if (openProgress < 0) openProgress = 0
   if (openProgress > 1) openProgress = 1
+
+  // 👉 déclenchement du son quand on commence vraiment à ouvrir
+  const seuil = 0.05  // 5% d'ouverture
+
+  // son d'ouverture : on passe de "vraiment fermé" à "un peu ouvert"
+  if (
+    !hasPlayedOpenSoundThisDrag &&
+    lastOpenProgress <= seuil &&
+    openProgress > seuil
+  ) {
+    doorOpen.play({ rate: 1, volume: 1 })
+    hasPlayedOpenSoundThisDrag = true
+  }
+
+  lastOpenProgress = openProgress
 })
 
 function endDrag() {
@@ -132,14 +154,14 @@ function endDrag() {
 
   isDragging = false
 
-  const wasOpen = isOpen
   // Seuil de décision : > 0.5 = ouvert
-  isOpen = openProgress > 0.5
+  const willStayOpen = openProgress > 0.5
+  isOpen = willStayOpen
 
-  // Si changement d'état → son
-  if (isOpen !== wasOpen) {
-    console.log("SON ?")
-    doorOpen.play({ rate:1, volume: 1})
+  // si la porte va se refermer automatiquement (pas assez ouverte)
+  // et qu’elle est encore un peu ouverte → on programmera le son à la fin de l’auto-close
+  if (!willStayOpen && openProgress > 0.01) {
+    closingSoundPending = true
   }
 }
 
@@ -164,6 +186,7 @@ function updateDoorAuto(dt) {
   if (isDragging || !introComplete) return
 
   const target = isOpen ? 1 : 0
+  const before = openProgress
 
   if (openProgress < target) {
     openProgress += openSpeed * dt
@@ -171,6 +194,17 @@ function updateDoorAuto(dt) {
   } else if (openProgress > target) {
     openProgress -= openSpeed * dt
     if (openProgress < target) openProgress = target
+  }
+
+  // 👉 la porte était en train de se refermer automatiquement
+  // et on vient d'arriver au "fermé"
+  if (
+    closingSoundPending &&
+    before > 0.01 &&          // avant : encore un peu ouverte
+    openProgress <= 0.01      // maintenant : vraiment fermée
+  ) {
+    doorClose.play({ rate: 1, volume: 1 })
+    closingSoundPending = false
   }
 }
 
@@ -227,7 +261,7 @@ function drawFinalNumberThree(geom) {
   const textProgress = (introProgress - 0.5) / 0.5
   ctx.globalAlpha = Math.min(Math.max(textProgress, 0), 1)
 
-  const fontSize = (roomHeight /pixelRatio)* 0.4
+  const fontSize = (roomHeight / pixelRatio) * 0.4
   ctx.fillStyle = "black"
   ctx.textAlign = "center"
   ctx.textBaseline = "middle"
@@ -239,9 +273,8 @@ function drawFinalNumberThree(geom) {
 
   ctx.fillText("3", w / 2, h / 2 + dropOffset)
   ctx.globalAlpha = 1
- 
 }
- 
+
 function drawBlackClosingRect(geom) {
   const { w, h } = geom
   if (blackRectProgress <= 0) return
@@ -328,8 +361,6 @@ function computeCirclePath(cx, cy, r, segments = 40) {
   return path
 }
 
-
-
 function drawDoor(geom) {
   const { doorWidth, doorHeight, doorLeftX, doorCenterY } = geom
 
@@ -364,7 +395,7 @@ function drawDoor(geom) {
   const tDoor = Math.min(introProgress / 0.8, 1)
   strokePathProgressive(doorPath, tDoor)
 
-   // Poignée (cercle en tracé progressif)
+  // Poignée (cercle en tracé progressif)
   const handleProgress = Math.min(introProgress / 0.8, 1)
 
   const handleRadius = doorWidth * 0.05
@@ -375,10 +406,6 @@ function drawDoor(geom) {
 
   ctx.globalAlpha = doorOpacity
   strokePathProgressive(handlePath, handleProgress)
-
-
-
-
 
   ctx.restore()
   ctx.globalAlpha = 1
@@ -413,4 +440,3 @@ function update(dt) {
     finish()
   }
 }
-

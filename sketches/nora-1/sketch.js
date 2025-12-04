@@ -6,13 +6,17 @@ const { ctx, canvas } = renderer
 
 run(update)
 
-
-
 // ==========================
 //  CONFIG GLOBALE
 // ==========================
 const WIN_GROW_DURATION = 1.0   // en secondes
 const WIN_MAX_SCALE = 1.8       // facteur de zoom max de la carte gagnante
+
+// Outro après victoire
+const OUTRO_DELAY_AFTER_WIN = 0.6  // secondes avant que la carte commence à tomber
+let outroDelayTimer = 0
+let outroStarted = false
+let outroDone = false
 
 let winningCard = null
 let winAnimTime = 0
@@ -129,6 +133,9 @@ function resetGame() {
   totalAttempts = 0
   canClick = false
   selectedCards = []
+  outroDelayTimer = 0
+  outroStarted = false
+  outroDone = false
   
   // Réinitialisation des cartes
   cards.forEach(card => {
@@ -222,77 +229,92 @@ function drawBentCard(bendAmount, side, value) {
   const x = -w / 2
   const y = -h / 2
 
-  const left   = x
-  const right  = x + w
-  const top    = y
-  const bottom = y + h
+  let left   = x
+  let right  = x + w
+  let top    = y
+  let bottom = y + h
 
+  // bend vertical (haut creusé / bas bombé)
   const bend = bendAmount * 20
+  top    -= bend
+  bottom += bend
 
-  const topCtrlY    = top - bend
-  const bottomCtrlY = bottom + bend
-  const leftCtrlX   = left - bend * 0.4
-  const rightCtrlX  = right + bend * 0.4
+  // 🔹 rayon des coins (ajuste ici pour arrondir plus ou moins)
+  const radius = 60 // essaie 40 / 80 / 100 pour voir
 
   ctx.beginPath()
+  // on commence en haut-gauche, décalé du rayon
+  ctx.moveTo(left + radius, top)
 
   // bord haut
-  ctx.moveTo(left, top)
-  ctx.quadraticCurveTo(
-    (left + right) / 2, topCtrlY,
-    right, top
-  )
+  ctx.lineTo(right - radius, top)
+  ctx.quadraticCurveTo(right, top, right, top + radius)
 
   // bord droit
-  ctx.quadraticCurveTo(
-    rightCtrlX, (top + bottom) / 2,
-    right, bottom
-  )
+  ctx.lineTo(right, bottom - radius)
+  ctx.quadraticCurveTo(right, bottom, right - radius, bottom)
 
   // bord bas
-  ctx.quadraticCurveTo(
-    (left + right) / 2, bottomCtrlY,
-    left, bottom
-  )
+  ctx.lineTo(left + radius, bottom)
+  ctx.quadraticCurveTo(left, bottom, left, bottom - radius)
 
   // bord gauche
-  ctx.quadraticCurveTo(
-    leftCtrlX, (top + bottom) / 2,
-    left, top
-  )
+  ctx.lineTo(left, top + radius)
+  ctx.quadraticCurveTo(left, top, left + radius, top)
 
   ctx.closePath()
 
- let fillColor
+  // couleur de fond
+  let fillColor
+  if (side === "front") {
+    fillColor = "#ffffffff"   // face avant
+  } else {
+    fillColor = "#ffffffff"   // face arrière
+  }
 
-if (side === "front") {
-  fillColor = "#ffffffff"   // face avant : gris clair uniforme
-} else {
-  fillColor = "#ffffffff"   // face arrière : gris uniforme
-}
+  ctx.fillStyle = fillColor
+  ctx.fill()
 
-ctx.fillStyle = fillColor
-ctx.fill()
-
-ctx.lineWidth = 2
-ctx.strokeStyle = "white"
-ctx.stroke()
+  ctx.lineWidth = 2
+  ctx.strokeStyle = "white"
+  ctx.stroke()
 
   if (side === "front") {
+    // chiffre au centre
     ctx.fillStyle = "black"
     ctx.font = "bold 250px system-ui"
     ctx.textAlign = "center"
     ctx.textBaseline = "middle"
 
+    // ton flip utilise scale(-1,1) ailleurs, on garde
     ctx.scale(-1, 1)
     ctx.fillText(value != null ? value : "?", 0, 0)
   } else {
+    // cadre intérieur (avec coins arrondis aussi, optionnel)
+    const pad = 60
+    const innerLeft   = -w / 2 + pad
+    const innerRight  =  w / 2 - pad
+    const innerTop    = -h / 2 + pad
+    const innerBottom =  h / 2 - pad
+    const innerRadius = 30
+
+    ctx.beginPath()
+    ctx.moveTo(innerLeft + innerRadius, innerTop)
+    ctx.lineTo(innerRight - innerRadius, innerTop)
+    ctx.quadraticCurveTo(innerRight, innerTop, innerRight, innerTop + innerRadius)
+    ctx.lineTo(innerRight, innerBottom - innerRadius)
+    ctx.quadraticCurveTo(innerRight, innerBottom, innerRight - innerRadius, innerBottom)
+    ctx.lineTo(innerLeft + innerRadius, innerBottom)
+    ctx.quadraticCurveTo(innerLeft, innerBottom, innerLeft, innerBottom - innerRadius)
+    ctx.lineTo(innerLeft, innerTop + innerRadius)
+    ctx.quadraticCurveTo(innerLeft, innerTop, innerLeft + innerRadius, innerTop)
+
     ctx.strokeStyle = "rgba(45, 45, 45, 0.25)"
     ctx.lineWidth = 4
-    const pad = 60
-    ctx.strokeRect(-w / 2 + pad, -h / 2 + pad, w - pad * 2, h - pad * 2)
+    ctx.stroke()
   }
 }
+
 
 // ==========================
 //  SHUFFLE
@@ -400,6 +422,9 @@ function handleWin(card) {
   winningCard = card
   winAnimTime = 0
   winAnimationDone = false
+  outroDelayTimer = 0
+  outroStarted = false
+  outroDone = false
 
   const centerX = canvas.width / 2
   const centerY = canvas.height / 2
@@ -566,16 +591,36 @@ function drawAnimatedCard(card, dt) {
 //  BOUCLE UPDATE
 // ==========================
 function update(dt) {
-  if(!introstarted){
-    startIntro();
-    introstarted=true;
+  if (!introstarted) {
+    startIntro()
+    introstarted = true
   }
+
   // anim de victoire (zoom carte gagnante)
   if (winningCard && !winAnimationDone) {
     winAnimTime += dt
     if (winAnimTime >= WIN_GROW_DURATION) {
       winAnimTime = WIN_GROW_DURATION
       winAnimationDone = true
+    }
+  }
+
+  // Après la fin du zoom de victoire → attente puis drop de la carte gagnante
+  if (winningCard && winAnimationDone && !outroStarted) {
+    outroDelayTimer += dt
+    if (outroDelayTimer >= OUTRO_DELAY_AFTER_WIN) {
+      outroStarted = true
+      // on fait tomber la carte gagnante en dessous de l'écran
+      winningCard.targetY = canvas.height + cardHeight * 3
+    }
+  }
+
+  // Quand la carte gagnante est complètement sortie de l'écran → finish()
+  if (outroStarted && !outroDone && winningCard) {
+    // on considère la carte "hors de l'écran" quand son bord supérieur est sous le bas du canvas
+    if (winningCard.y - cardHeight / 2 > canvas.height) {
+      outroDone = true
+      finish()
     }
   }
 
