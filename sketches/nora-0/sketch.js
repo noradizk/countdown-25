@@ -77,7 +77,7 @@ let zeroComplete = false
 let outroState = "none"
 let outroTime = 0
 
-const OUTRO_RETURN_DURATION = 0.5   // pendule revient vers le bas (chemin le plus court)
+const OUTRO_RETURN_DURATION = 1.5   // pendule revient vers le bas (chemin le plus court)
 const OUTRO_SHRINK_DURATION = 0.3   // pendule remonte le long du fil et disparaît
 const OUTRO_HOLD_DURATION   = 3.0   // pause sur le zéro
 const FADE_DURATION         = 0.7   // fondu au noir
@@ -564,10 +564,9 @@ function drawInnerMask(geom) {
 function drawPendulum(geom) {
   const { pivotX, pivotY, bobX, bobY, bobRadius } = geom
 
-  if (lengthScale <= 0) {
-    return
-  }
+  if (lengthScale <= 0) return
 
+  // ---- CÂBLE ----
   ctx.strokeStyle = "white"
   ctx.lineWidth = 3
   ctx.beginPath()
@@ -575,14 +574,27 @@ function drawPendulum(geom) {
   ctx.lineTo(bobX, bobY)
   ctx.stroke()
 
+  // ---- BOULE EXTERNE ----
   ctx.beginPath()
   ctx.arc(bobX, bobY, bobRadius, 0, Math.PI * 2)
   ctx.fillStyle = "gray"
   ctx.fill()
 
   ctx.lineWidth = 3
-  ctx.strokeStyle = "red"
+  ctx.strokeStyle = "gray"
   ctx.stroke()
+
+  // ---- ROND INTERNE ----
+  const innerRadius = bobRadius * 0.6  // taille du rond intérieur
+  ctx.beginPath()
+  ctx.arc(bobX, bobY, innerRadius, 0, Math.PI * 2)
+  ctx.fillStyle = "black"              // couleur du centre
+  ctx.fill()
+
+  // optionnel : contour du rond intérieur
+  // ctx.lineWidth = 2
+  // ctx.strokeStyle = "white"
+  // ctx.stroke()
 }
 
 function drawFadeOverlay() {

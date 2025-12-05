@@ -33,8 +33,8 @@ let blackRectProgress = 0
 // =====================
 // SONS PORTE
 // =====================
-const doorOpen = await audio.load("audio/ouverte.mp3")
-const doorClose = await audio.load("audio/ferme.mp3")
+const doorOpen = await audio.load("audio/son-ouverte.mp3")
+const doorClose = await audio.load("audio/son-ferme.mp3")
 
 // pour la logique des sons
 let lastOpenProgress = 0
