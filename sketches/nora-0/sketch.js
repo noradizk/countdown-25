@@ -56,6 +56,56 @@ const DRAG_VELOCITY_SCALE = 0.9 // essaie 0.5 / 1 / 1.5
 
 
 // =====================
+// AUDIO
+// =====================
+
+// Son one-shot au release
+const pendulumReleaseSound = new Audio("audio/pendulum.wav")
+pendulumReleaseSound.volume = 0.5
+
+// Son en boucle après un certain temps
+const pendulumLoopSound = new Audio("audio/pendulum.wav")
+pendulumLoopSound.volume = 0.3
+pendulumLoopSound.loop = true
+
+let loopTimeout = null
+
+function playPendulumReleaseSound() {
+  try {
+    pendulumReleaseSound.currentTime = 0
+    pendulumReleaseSound.play()
+  } catch (e) {
+    // policies navigateur
+  }
+}
+
+function startLoopAfterDelay(delayMs) {
+  if (loopTimeout !== null) {
+    clearTimeout(loopTimeout)
+    loopTimeout = null
+  }
+
+  loopTimeout = setTimeout(() => {
+    try {
+      pendulumLoopSound.currentTime = 0
+      pendulumLoopSound.play()
+    } catch (e) {
+      // policies navigateur
+    }
+  }, delayMs)
+}
+
+function stopLoop() {
+  if (loopTimeout !== null) {
+    clearTimeout(loopTimeout)
+    loopTimeout = null
+  }
+  pendulumLoopSound.pause()
+  pendulumLoopSound.currentTime = 0
+}
+
+
+// =====================
 // TIME / OUTRO
 // =====================
 
@@ -250,7 +300,6 @@ function updateLoopDetectionFromGeometry(geom) {
   if (sectorIndex < 0) sectorIndex = 0
   if (sectorIndex >= NUM_SECTORS) sectorIndex = NUM_SECTORS - 1
 
-
   if (!window.sectorCounter) window.sectorCounter = 0
   window.sectorCounter++
   if (window.sectorCounter >= 60) {
@@ -266,8 +315,6 @@ function updateLoopDetectionFromGeometry(geom) {
     zeroComplete = true
     console.log("Every sector visited!")
   }
-
-  
 }
 
 
@@ -289,6 +336,9 @@ canvas.addEventListener("pointerdown", (event) => {
   if (dist <= bobRadius * 1.6) {
     isDragging = true
     angularVelocity = 0
+
+    // si on redrag, on coupe le loop
+    stopLoop()
 
     // init tracking du drag
     lastDragAngle = angle
@@ -352,6 +402,12 @@ function endDrag() {
 
   // quand on relâche, on transforme le "flick" en vitesse initiale
   angularVelocity = dragAngularVelocity * DRAG_VELOCITY_SCALE
+
+  // 🔊 son one-shot au release
+  playPendulumReleaseSound()
+
+  // 🔁 on démarre un loop discret après 500 ms
+  startLoopAfterDelay(1000)
 
   // coupe la trace pour ne pas relier avec les tracés précédents
   trailPoints.push(null)
@@ -446,6 +502,9 @@ function updateOutro(dt) {
       outroTime = 0
       outroStartAngle = angle
       lengthScale = 1
+
+      // dès que l’outro commence, on coupe le loop
+      stopLoop()
     }
     return
   }
@@ -456,8 +515,7 @@ function updateOutro(dt) {
     const t = Math.min(outroTime / OUTRO_RETURN_DURATION, 1)
     const eased = easeOutCubic(t)
 
-
-    angle = math.lerpAngleRad(outroStartAngle,REST_ANGLE,eased)
+    angle = math.lerpAngleRad(outroStartAngle, REST_ANGLE, eased)
     lengthScale = 1
 
     if (t >= 1) {
@@ -492,6 +550,7 @@ function updateOutro(dt) {
 
     if (t >= 1 && !hasFinished) {
       hasFinished = true
+      stopLoop()
       finish()
     }
   }
@@ -579,12 +638,6 @@ function drawPendulum(geom) {
   ctx.lineWidth = 3
   ctx.strokeStyle = "gray"
   ctx.stroke()
-
-
-  // optionnel : contour du rond intérieur
-  // ctx.lineWidth = 2
-  // ctx.strokeStyle = "white"
-  // ctx.stroke()
 }
 
 function drawFadeOverlay() {

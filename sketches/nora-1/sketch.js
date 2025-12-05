@@ -33,7 +33,7 @@ const shuffleLerp = 0.18          // vitesse de lerp vers targetX/Y
 //  AUDIO
 // ==========================
 const flipSound = new Audio("audio/card-lose-2.wav")
-flipSound.volume = 0.6
+flipSound.volume = 0.3
 
 const winSound = new Audio("audio/card-win.wav")
 winSound.volume = 0.9
@@ -80,6 +80,9 @@ const cards = []
 
 let canClick      = false     // clics désactivés au début (intro)
 let selectedCards = []        // cartes actuellement retournées (max 2 pour la lose)
+
+// nombre de manches perdues
+let attemptCount = 0
 
 // ==========================
 //  POSITION DE BASE DES CARTES
@@ -409,6 +412,9 @@ function handleWin(card) {
 }
 
 function handleLose(lostCards) {
+  // on compte cette manche comme une tentative ratée
+  attemptCount++
+
   const dropTargetY = canvas.height + cardHeight
 
   lostCards.forEach((card) => {
@@ -441,9 +447,17 @@ function handleCardClick(card) {
   if (!canClick) return
   if (selectedCards.includes(card)) return
 
-  const isWinCard = (card.displayValue === WIN_VALUE)
+  // valeur logique gagnante
+  let isWinCard = (card.displayValue === WIN_VALUE)
 
-  // Son selon carte
+  // 🎯 TRICHE : si on a déjà perdu 1 manche (attemptCount === 1),
+  // alors la première carte du nouveau tour devient FORCÉMENT gagnante
+  if (attemptCount === 1 && selectedCards.length === 0) {
+    card.displayValue = WIN_VALUE
+    isWinCard = true
+  }
+
+  // Son selon carte (après éventuelle triche)
   if (isWinCard) {
     playWinSound()
   } else {
@@ -457,7 +471,7 @@ function handleCardClick(card) {
 
   setTimeout(() => {
     if (isWinCard) {
-      // 🎯 Win immédiate même si c'est la première carte
+      // 🎯 Win immédiate
       handleWin(card)
       selectedCards = []
       return

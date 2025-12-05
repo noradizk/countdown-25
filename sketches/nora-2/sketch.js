@@ -20,8 +20,12 @@ let hasFinishCalled = false
 // ---------------------------
 // on utilise l'API audio de ton engine
 const moletteMove = [
-  await audio.load({src:"audio/molette.mp3"}),
-  await audio.load({src:"audio/molette.mp3"})]
+  await audio.load({src:"audio/molette6.mp3"}),
+  await audio.load({src:"audio/molette6.mp3"}),
+  await audio.load({src:"audio/molette6.mp3"}),
+  await audio.load({src:"audio/molette6.mp3"})]
+
+
 // loop pendant le drag
 let isMolettePlaying = false
 
@@ -537,6 +541,16 @@ function update(dt) {
 
   // 4) KNOBS par-dessus, avec le même offset que le rond blanc
   drawKnobsScene(cx, cy, offsetX, offsetY)
+    if(Math.abs(knobSmall.angle - (knobSmall.lastSoundAngle ?? 0)) > math.toRadian(3))
+  {
+    console.log(knobSmall.angle)
+    knobSmall.lastSoundAngle = knobSmall.angle;
+    const randomId = Math.floor(Math.random()*moletteMove.length)
+    moletteMove[randomId].play({
+      volue:math.lerp(.5,1,Math.random()),
+      rate:math.lerp(.9,1.1,Math.random()),
+    });
+  }
 
 
   if(Math.abs(knobBig.angle - (knobBig.lastSoundAngle ?? 0)) > math.toRadian(3))
