@@ -69,12 +69,8 @@ let lastInteractionTime = 0
 // inactivité après 0 complet avant de lancer l’outro
 const IDLE_BEFORE_OUTRO = 1.0 // en secondes
 
-// détection du tour complet
+// détection du 0 (tour complet du tracé)
 let zeroComplete = false
-let lastLoopAngle = REST_ANGLE
-let accumulatedRotation = 0
-const TWO_PI = Math.PI * 2
-const LOOP_THRESHOLD = TWO_PI * 0.9  // ~360° mais un peu de marge
 
 // OUTRO machine à états
 // "none" → "return" → "shrink" → "hold" → "fade"
@@ -93,7 +89,6 @@ let hasFinished = false
 let outroStartAngle = REST_ANGLE
 
 // échelle de longueur du pendule (1 = normal, 0 = raccourci à 0)
-// on l’utilise pour l’outro shrink, mais 1 en temps normal
 let lengthScale = 1
 
 // masque du zéro figé une fois le 0 complété
@@ -121,6 +116,52 @@ const trailPoints = []
 
 
 // =====================
+// DÉTECTION PAR SECTEURS (basée sur le tracé autour du pivot)
+// =====================
+
+const NUM_SECTORS = 72                    // nombre de "parts de pizza"
+const SECTOR_COVERAGE_THRESHOLD = 0.85    // % de secteurs visités pour valider le tour
+const MAX_GAP_RATIO = 0.25                // max = 1/4 du cercle non couvert
+const MIN_LOOP_RADIUS_FACTOR = 0.7        // zone annulaire min (en % de la longueur)
+const MAX_LOOP_RADIUS_FACTOR = 1.3        // zone annulaire max
+
+let sectorVisited = new Array(NUM_SECTORS).fill(false)
+
+function resetLoopDetectionIfNeeded() {
+  if (zeroComplete) return
+  sectorVisited.fill(false)
+}
+
+function computeCoverageAndMaxGap() {
+  let visitedCount = 0
+  for (let i = 0; i < NUM_SECTORS; i++) {
+    if (sectorVisited[i]) visitedCount++
+  }
+  const coverage = visitedCount / NUM_SECTORS
+
+  // max gap circulaire de secteurs non visités
+  let maxGap = 0
+  let currentGap = 0
+
+  // on parcourt deux fois pour gérer le wrap-around
+  for (let i = 0; i < NUM_SECTORS * 2; i++) {
+    const idx = i % NUM_SECTORS
+    if (!sectorVisited[idx]) {
+      currentGap++
+      if (currentGap > maxGap) maxGap = currentGap
+    } else {
+      currentGap = 0
+    }
+  }
+
+  if (maxGap > NUM_SECTORS) maxGap = NUM_SECTORS
+  const maxGapRatio = maxGap / NUM_SECTORS
+
+  return { coverage, maxGapRatio }
+}
+
+
+// =====================
 // COORDONNÉES
 // =====================
 
@@ -138,7 +179,6 @@ function getCanvasCoordinates(event) {
 
 // =====================
 // GÉOMÉTRIE PENDULE
-// (physique en angle, position déformée en ellipse)
 // =====================
 
 function getPendulumGeometry() {
@@ -154,7 +194,6 @@ function getPendulumGeometry() {
   // scale d’intro : 0 → 1
   const s = introComplete ? 1 : easeOutCubic(introProgress)
 
-  // en temps normal lengthScale = 1 ; pendant l’outro shrink, 1 → 0
   const length = baseLength * s * lengthScale
   const bobRadius = baseBobRadius * s
 
@@ -179,39 +218,56 @@ function getPendulumGeometry() {
 
 
 // =====================
-// DÉTECTION DU TOUR COMPLET (360°) + lock du masque du zéro
+// DÉTECTION DU 0 BASÉE SUR LE TRACÉ
 // =====================
 
-function updateLoopDetection(geom) {
+function updateLoopDetectionFromGeometry(geom) {
   if (!introComplete) return
   if (zeroComplete) return
 
-  let delta = angle - lastLoopAngle
+  const { pivotX, pivotY, length, bobX, bobY, bobRadius } = geom
 
-  // on corrige pour toujours prendre le chemin le plus court
-  if (delta > Math.PI)  delta -= TWO_PI
-  if (delta < -Math.PI) delta += TWO_PI
+  if (length <= 0) return
 
-  accumulatedRotation += delta
-  lastLoopAngle = angle
+  // distance du pivot
+  const dx = bobX - pivotX
+  const dy = bobY - pivotY
+  const r = Math.sqrt(dx * dx + dy * dy)
 
-  // condition : tour complet + pendule revenu vers le bas
-  const ANGLE_MARGIN = 0.3 // ~17°
-  if (
-    Math.abs(accumulatedRotation) >= LOOP_THRESHOLD &&
-    Math.abs(angle - REST_ANGLE) < ANGLE_MARGIN
-  ) {
-    zeroComplete = true
-    lastInteractionTime = globalTime
+  const minR = length * MIN_LOOP_RADIUS_FACTOR
+  const maxR = length * MAX_LOOP_RADIUS_FACTOR
 
-    // on fige la taille du masque du zéro à ce moment-là
-    const { length, bobRadius } = geom
-    const outerX = length * ellipseScaleX
-    const outerY = length * ellipseScaleY
-    const thickness = bobRadius * 2.2
-    zeroMaskInnerX = Math.max(0, outerX - thickness)
-    zeroMaskInnerY = Math.max(0, outerY - thickness)
+  // on ne prend en compte que les points dans une "couronne" autour du pivot
+  if (r < minR || r > maxR) {
+    return
   }
+
+  // angle autour du pivot
+  let a = Math.atan2(dy, dx) // [-PI..PI]
+  if (a < 0) a += Math.PI * 2 // [0..2PI]
+
+  let sectorIndex = Math.floor(a / (2 * Math.PI) * NUM_SECTORS)
+  if (sectorIndex < 0) sectorIndex = 0
+  if (sectorIndex >= NUM_SECTORS) sectorIndex = NUM_SECTORS - 1
+
+
+  if (!window.sectorCounter) window.sectorCounter = 0
+  window.sectorCounter++
+  if (window.sectorCounter >= 60) {
+    console.log(sectorVisited)
+    window.sectorCounter = 0
+  }
+  if (!sectorVisited[sectorIndex]) {
+    sectorVisited[sectorIndex] = true
+  }
+
+  // Check if all sectors have been visited
+  if (sectorVisited.every(visited => visited)) {
+    zeroComplete = true
+    console.log("Every sector visited!")
+  }
+
+  
 }
 
 
@@ -238,6 +294,9 @@ canvas.addEventListener("pointerdown", (event) => {
     lastDragAngle = angle
     lastDragTime = performance.now() / 1000 // en secondes
     dragAngularVelocity = 0
+
+    // nouveau "lancer" → on reset la couverture des secteurs si le 0 n'est pas déjà validé
+    resetLoopDetectionIfNeeded()
 
     // interaction utilisateur → reset du timer d’inactivité
     lastInteractionTime = globalTime
@@ -271,6 +330,7 @@ canvas.addEventListener("pointermove", (event) => {
       let delta = newAngle - lastDragAngle
 
       // normalisation pour éviter le saut à ±π
+      const TWO_PI = Math.PI * 2
       if (delta > Math.PI) delta -= TWO_PI
       if (delta < -Math.PI) delta += TWO_PI
 
@@ -319,18 +379,15 @@ function updatePendulumPhysics(dt, geom) {
   if (isDragging) return        // pas de physique pendant le drag
 
   const { length } = geom
+  if (length <= 0) return
 
-  // angle par rapport à la verticale vers le bas
   const theta = angle - Math.PI / 2
-
   const gOverL = gravityConstant / length
   const angularAcceleration = -gOverL * Math.sin(theta)
 
-  // intégration
   angularVelocity += angularAcceleration * dt
 
-  // clamp de la vitesse angulaire pour éviter les valeurs folles
-  const MAX_ANGULAR_SPEED = 4.0
+  const MAX_ANGULAR_SPEED = 7.0
   if (angularVelocity > MAX_ANGULAR_SPEED) angularVelocity = MAX_ANGULAR_SPEED
   if (angularVelocity < -MAX_ANGULAR_SPEED) angularVelocity = -MAX_ANGULAR_SPEED
 
@@ -340,7 +397,7 @@ function updatePendulumPhysics(dt, geom) {
 
 
 // =====================
-// TRACE (après relâche, sur la même trajectoire que le pendule)
+// TRACE
 // =====================
 
 function updateTrail(geom) {
@@ -357,20 +414,15 @@ function updateTrail(geom) {
 
   if (!last) {
     trailPoints.push(point)
-    return
-  }
-
-  if (last === null) {
+  } else if (last === null) {
     trailPoints.push(point)
-    return
-  }
-
-  const dx = point.x - last.x
-  const dy = point.y - last.y
-  const dist = Math.sqrt(dx * dx + dy * dy)
-
-  if (dist >= minDist) {
-    trailPoints.push(point)
+  } else {
+    const dx = point.x - last.x
+    const dy = point.y - last.y
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist >= minDist) {
+      trailPoints.push(point)
+    }
   }
 
   const maxPoints = 5000
@@ -388,47 +440,41 @@ function updateOutro(dt) {
   if (!zeroComplete) return
   if (hasFinished) return
 
-  // si on n’a pas encore commencé l’outro → on surveille l’inactivité
   if (outroState === "none") {
     if (!isDragging && (globalTime - lastInteractionTime >= IDLE_BEFORE_OUTRO)) {
       outroState = "return"
       outroTime = 0
       outroStartAngle = angle
-      lengthScale = 1 // on s’assure que la longueur est normale au début
+      lengthScale = 1
     }
     return
   }
 
-  // une fois qu’on est en outro, on avance le temps local
   outroTime += dt
 
   if (outroState === "return") {
-    // pendule revient vers l’angle REST_ANGLE par le chemin le plus court (0.5s)
     const t = Math.min(outroTime / OUTRO_RETURN_DURATION, 1)
     const eased = easeOutCubic(t)
 
-    // diff angulaire chemin le plus court
+    const TWO_PI = Math.PI * 2
     let diff = REST_ANGLE - outroStartAngle
     if (diff > Math.PI) diff -= TWO_PI
     if (diff < -Math.PI) diff += TWO_PI
 
     angle = outroStartAngle + diff * eased
-    lengthScale = 1 // longueur normale
+    lengthScale = 1
 
     if (t >= 1) {
-      // on est revenu au bas
       angle = REST_ANGLE
       outroState = "shrink"
       outroTime = 0
     }
   } else if (outroState === "shrink") {
-    // le pendule remonte le long du fil et disparaît (0.3s)
     const t = Math.min(outroTime / OUTRO_SHRINK_DURATION, 1)
     const eased = easeOutCubic(t)
 
-    // on réduit uniquement la longueur du pendule, l’angle reste vers le bas
     angle = REST_ANGLE
-    lengthScale = 1 - eased // 1 → 0
+    lengthScale = 1 - eased
 
     if (t >= 1) {
       lengthScale = 0
@@ -436,9 +482,8 @@ function updateOutro(dt) {
       outroTime = 0
     }
   } else if (outroState === "hold") {
-    // pause sur le zéro seul (3s)
     angle = REST_ANGLE
-    lengthScale = 0 // pendule totalement raccourci, on pourra choisir de ne plus l’afficher
+    lengthScale = 0
 
     if (outroTime >= OUTRO_HOLD_DURATION) {
       outroState = "fade"
@@ -446,7 +491,6 @@ function updateOutro(dt) {
       fadeProgress = 0
     }
   } else if (outroState === "fade") {
-    // fondu au noir (0.7s) puis finish
     const t = Math.min(outroTime / FADE_DURATION, 1)
     fadeProgress = t
 
@@ -472,9 +516,8 @@ function drawTrail(geom) {
 
   const { bobRadius } = geom
 
-  // trace blanche
   ctx.strokeStyle = "white"
-  ctx.lineWidth = bobRadius * 2 // = diamètre de la boule
+  ctx.lineWidth = bobRadius * 2
   ctx.lineCap = "round"
   ctx.lineJoin = "round"
 
@@ -486,7 +529,6 @@ function drawTrail(geom) {
       newSubPath = true
       continue
     }
-
     if (newSubPath) {
       ctx.moveTo(p.x, p.y)
       newSubPath = false
@@ -498,18 +540,14 @@ function drawTrail(geom) {
   ctx.stroke()
 }
 
-// masque noir à l'intérieur du "0" pour avoir un donut propre
 function drawInnerMask(geom) {
   const { pivotX, pivotY, length, bobRadius } = geom
 
-  // si on a figé le masque au moment où le zéro a été complété
   let innerX, innerY
-
   if (zeroMaskInnerX != null && zeroMaskInnerY != null) {
     innerX = zeroMaskInnerX
     innerY = zeroMaskInnerY
   } else {
-    // version dynamique avant que le zéro soit complet
     const outerX = length * ellipseScaleX
     const outerY = length * ellipseScaleY
     const thickness = bobRadius * 2.2
@@ -526,12 +564,10 @@ function drawInnerMask(geom) {
 function drawPendulum(geom) {
   const { pivotX, pivotY, bobX, bobY, bobRadius } = geom
 
-  // si lengthScale = 0 (pendule complètement raccourci), on peut choisir de ne plus le dessiner
   if (lengthScale <= 0) {
     return
   }
 
-  // fil
   ctx.strokeStyle = "white"
   ctx.lineWidth = 3
   ctx.beginPath()
@@ -539,7 +575,6 @@ function drawPendulum(geom) {
   ctx.lineTo(bobX, bobY)
   ctx.stroke()
 
-  // boule
   ctx.beginPath()
   ctx.arc(bobX, bobY, bobRadius, 0, Math.PI * 2)
   ctx.fillStyle = "gray"
@@ -550,7 +585,6 @@ function drawPendulum(geom) {
   ctx.stroke()
 }
 
-// overlay de fade
 function drawFadeOverlay() {
   if (fadeProgress <= 0) return
 
@@ -572,28 +606,24 @@ function update(dt) {
 
   globalTime += dt
 
-  // 1) mettre à jour l’intro
+  // intro scaling
   updateIntro(dt)
 
   const geomBefore = getPendulumGeometry()
   updatePendulumPhysics(dt, geomBefore)
 
-  // 2) détection du tour complet (uniquement avant l’outro)
-  updateLoopDetection(geomBefore)
+  // détection du 0 basée sur la position actuelle (tracé)
+  updateLoopDetectionFromGeometry(geomBefore)
 
-  // 3) logique d’outro (après zéro complet)
+  // outro (si zeroComplete + 1s d’inactivité)
   updateOutro(dt)
 
   const geom = getPendulumGeometry()
   updateTrail(geom)
 
-  // =====================
-  // RENDER
-  // =====================
-
   drawBackground(geom.w, geom.h)
-  drawTrail(geom)       // trace = zéro
-  drawInnerMask(geom)   // masque au centre du zéro
-  drawPendulum(geom)    // pendule par-dessus (ou pas, selon l’outro)
-  drawFadeOverlay()     // fondu si on est en phase fade
+  drawTrail(geom)
+  drawInnerMask(geom)
+  drawPendulum(geom)
+  drawFadeOverlay()
 }
