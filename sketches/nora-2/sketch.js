@@ -19,8 +19,9 @@ let hasFinishCalled = false
 //   SON
 // ---------------------------
 // on utilise l'API audio de ton engine
-const moletteMove = await audio.load("audio/molette.mp3")
-
+const moletteMove = [
+  await audio.load({src:"audio/molette.mp3"}),
+  await audio.load({src:"audio/molette.mp3"})]
 // loop pendant le drag
 let isMolettePlaying = false
 
@@ -30,27 +31,28 @@ function startMolette() {
 
   // si l'objet audio supporte .loop (style HTMLAudio)
   try {
-    moletteMove.loop = true
+    //moletteMove.loop = true
   } catch (e) {
     // si pas supporté, on ignore
   }
 
-  moletteMove.play({ rate: 1, volume: 1 })
+  
 }
 
 function stopMolette() {
   if (!isMolettePlaying) return
   isMolettePlaying = false
 
+
   // suivant l'implémentation de ton moteur audio
-  if (typeof moletteMove.stop === "function") {
-    moletteMove.stop()
-  } else if (typeof moletteMove.pause === "function") {
-    moletteMove.pause()
-    if ("currentTime" in moletteMove) {
-      moletteMove.currentTime = 0
-    }
-  }
+  // if (typeof moletteMove.stop === "function") {
+  //   moletteMove.stop()
+  // } else if (typeof moletteMove.pause === "function") {
+  //   moletteMove.pause()
+  //   if ("currentTime" in moletteMove) {
+  //     moletteMove.currentTime = 0
+  //   }
+  // }
 }
 
 // ---------------------------
@@ -232,7 +234,7 @@ function stopDragging() {
   knobBig.dragging = false
 
   // si plus aucun knob n'est drag → on coupe le son
-  stopMolette()
+  //stopMolette()
 }
 
 canvas.addEventListener("mousedown", (e) => {
@@ -255,9 +257,9 @@ canvas.addEventListener("mousedown", (e) => {
   }
 
   // si on commence à drag un knob → on lance le son en loop
-  if (startedDrag) {
-    startMolette()
-  }
+  //if (startedDrag) {
+   // startMolette()
+  //}
 })
 
 canvas.addEventListener("mousemove", (e) => {
@@ -339,11 +341,11 @@ function drawGraduatedCircle(
 
   // rotation du knob
   ctx.rotate(angle)
-
+const colorCircle = "rgba(44, 44, 44, 1)"
   // --- CERCLE ---
   ctx.beginPath()
   ctx.lineWidth = strokeWidth
-  ctx.strokeStyle = "gray"
+  ctx.strokeStyle = colorCircle
   ctx.arc(0, 0, radius, 0, Math.PI * 2)
   ctx.stroke()
 
@@ -370,8 +372,8 @@ function drawGraduatedCircle(
 
   // --- HANDLE ---
   ctx.beginPath()
-  ctx.fillStyle = "gray"
-  ctx.strokeStyle = "gray"
+  ctx.fillStyle = colorCircle
+  ctx.strokeStyle = colorCircle
   ctx.lineWidth = 4
 
   ctx.rect(
@@ -535,6 +537,18 @@ function update(dt) {
 
   // 4) KNOBS par-dessus, avec le même offset que le rond blanc
   drawKnobsScene(cx, cy, offsetX, offsetY)
+
+
+  if(Math.abs(knobBig.angle - (knobBig.lastSoundAngle ?? 0)) > math.toRadian(3))
+  {
+    console.log(knobBig.angle)
+    knobBig.lastSoundAngle = knobBig.angle;
+    const randomId = Math.floor(Math.random()*moletteMove.length)
+    moletteMove[randomId].play({
+      volue:math.lerp(.5,1,Math.random()),
+      rate:math.lerp(.9,1.1,Math.random()),
+    });
+  }
 }
 
 // lancement de la boucle

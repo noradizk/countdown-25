@@ -1,6 +1,6 @@
 import { createEngine } from "../_shared/engine.js"
 
-const { renderer, run, finish } = createEngine()
+const { renderer, run, finish, math } = createEngine()
 const { ctx, canvas } = renderer
 
 run(update)
@@ -456,12 +456,8 @@ function updateOutro(dt) {
     const t = Math.min(outroTime / OUTRO_RETURN_DURATION, 1)
     const eased = easeOutCubic(t)
 
-    const TWO_PI = Math.PI * 2
-    let diff = REST_ANGLE - outroStartAngle
-    if (diff > Math.PI) diff -= TWO_PI
-    if (diff < -Math.PI) diff += TWO_PI
 
-    angle = outroStartAngle + diff * eased
+    angle = math.lerpAngleRad(outroStartAngle,REST_ANGLE,eased)
     lengthScale = 1
 
     if (t >= 1) {
@@ -584,12 +580,6 @@ function drawPendulum(geom) {
   ctx.strokeStyle = "gray"
   ctx.stroke()
 
-  // ---- ROND INTERNE ----
-  const innerRadius = bobRadius * 0.6  // taille du rond intérieur
-  ctx.beginPath()
-  ctx.arc(bobX, bobY, innerRadius, 0, Math.PI * 2)
-  ctx.fillStyle = "black"              // couleur du centre
-  ctx.fill()
 
   // optionnel : contour du rond intérieur
   // ctx.lineWidth = 2
